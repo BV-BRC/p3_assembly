@@ -43,6 +43,137 @@ def determineReadFileType(readId):
         return "nanopore" # 
     return "na"
 
+def runTrimmomatic(args):
+    if args.illumina:
+        if not os.path.isfile(args.illuminaAdapters): #default illuminaAdapters is "illumina_adapters.fa", should be in same directory as this script
+            scriptDir = os.path.dirname(sys.argv[0])
+            if os.path.isfile(os.path.join(scriptDir, args.illuminaAdapters)):
+                args.illuminaAdapters = os.path.join(scriptDir, args.illuminaAdapters)
+        trimmedIllumina = []
+        for item in args.illumina:
+            if ':' in item or '%' in item:
+            # paired-end read
+                separator = ':'
+                if ':' in item:
+                    read1, read2 = item.split(':')
+                else:
+                    read1, read2 = item.split('%')
+                    separator = '%'
+                read1OutBase = os.path.join(args.output_dir, os.path.basename(read1))
+                if read1OutBase.endswith(".fq.gz"):
+                    read1OutBase = read1OutBase[:-6]
+                elif read1OutBase.endswith(".fq"):
+                    read1OutBase = read1OutBase[:-3]
+                elif read1OutBase.endswith(".fastq"):
+                    read1OutBase = read1OutBase[:-6]
+                elif read1OutBase.endswith(".fastq.gz"):
+                    read1OutBase = read1OutBase[:-9]
+                elif read1OutBase.endswith(".gz"):
+                    read1OutBase = read1OutBase[:-3]
+                read1OutBase += "_trim"
+                read2OutBase = os.path.join(args.output_dir, os.path.basename(read2))
+                if read2OutBase.endswith(".fq.gz"):
+                    read2OutBase = read2OutBase[:-6]
+                elif read2OutBase.endswith(".fq"):
+                    read2OutBase = read2OutBase[:-3]
+                elif read2OutBase.endswith(".fastq"):
+                    read2OutBase = read2OutBase[:-6]
+                elif read2OutBase.endswith(".fastq.gz"):
+                    read2OutBase = read2OutBase[:-9]
+                elif read2OutBase.endswith(".gz"):
+                    read2OutBase = read2OutBase[:-3]
+                read2OutBase += "_trim"
+                
+                trimLog = read1OutBase+".log"
+                #command = "java -jar %s PE -threads %d -trimlog %s "%(args.pathToTrimmomatic, args.threads, trimLog)
+                #command += " %s %s %s %s %s %s "%(read1, read2, read1OutBase+"_P.fq", read1OutBase+"_U.fq", read2OutBase+"_P.fq", read2OutBase+"_U.fq")
+                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(args.illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
+                command = ["java", "-jar", args.pathToTrimmomatic, "PE", "-threads", str(args.threads), "-trimlog", trimLog]
+                command.extend([read1, read2, read1OutBase+"_P.fq", read1OutBase+"_U.fq", read2OutBase+"_P.fq", read2OutBase+"_U.fq"])
+                if os.path.isfile(args.illuminaAdpaters):
+                    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters)
+                command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
+                if args.debug:
+                    sys.stderr.write("command = "+" ".join(command)+"\n")
+                subprocess.call(command, shell=False)
+                trimmedIllumina.append(separator.join(read1OutBase+"_P.fq", read2OutBase+"_P.fq"))
+                trimmedIllumina.append(read1OutBase+"_U.fq")
+                trimmedIllumina.append(read2OutBase+"_U.fq")
+
+            else:
+                # an unpaired read file
+                outBase = os.path.join(args.output_dir, os.path.basename(item))+"_trim"
+                trimLog = outBase+".log"
+                #command = "java -jar %s SE -threads %d -trimlog %s "%(args.pathToTrimmomatic, args.threads, trimLog)
+                #command += " %s %s "%(item, outBase)
+                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(args.illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
+                command = ["java", "-jar", args.pathToTrimmomatic, "SE", "-threads", str(args.threads), "-trimlog", trimLog]
+                command.extend([item, outBase])
+                if os.path.isfile(args.illuminaAdpaters):
+                    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters)
+                command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
+                if args.debug:
+                    sys.stderr.write("command = "+" ".join(command)+"\n")
+                subprocess.call(command, shell=False)
+                trimmedIllumina.append(outBase)
+        args.illumina = trimmedIllumina # replace original list of illumina reads with trimmed versions
+
+    if args.iontorrent:
+        trimmedIontorrent = []
+        for item in args.iontorrent:
+            if ':' in item:
+            # paired-end read
+                read1, read2 = item.split(':')
+                read1OutBase = os.path.join(args.output_dir, os.path.basename(read1))
+                if read1OutBase.endswith(".fq.gz"):
+                    read1OutBase = read1OutBase[:-6]
+                elif read1OutBase.endswith(".fq"):
+                    read1OutBase = read1OutBase[:-3]
+                elif read1OutBase.endswith(".fastq"):
+                    read1OutBase = read1OutBase[:-6]
+                elif read1OutBase.endswith(".fastq.gz"):
+                    read1OutBase = read1OutBase[:-9]
+                elif read1OutBase.endswith(".gz"):
+                    read1OutBase = read1OutBase[:-3]
+                read1OutBase += "_trim"
+                read2OutBase = os.path.join(args.output_dir, os.path.basename(read2))
+                if read2OutBase.endswith(".fq.gz"):
+                    read2OutBase = read2OutBase[:-6]
+                elif read2OutBase.endswith(".fq"):
+                    read2OutBase = read2OutBase[:-3]
+                elif read2OutBase.endswith(".fastq"):
+                    read2OutBase = read2OutBase[:-6]
+                elif read2OutBase.endswith(".fastq.gz"):
+                    read2OutBase = read2OutBase[:-9]
+                elif read2OutBase.endswith(".gz"):
+                    read2OutBase = read2OutBase[:-3]
+                read2OutBase += "_trim"
+                
+                trimLog = read1OutBase+".log"
+                
+                command = ["java", "-jar", args.pathToTrimmomatic, "PE", "-threads", str(args.threads), "-trimlog", trimLog]
+                command.extend([read1, read2, read1OutBase+"_P.fq", read1OutBase+"_U.fq", read2OutBase+"_P.fq", read2OutBase+"_U.fq"])
+                command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
+                if args.debug:
+                    sys.stderr.write("command = "+" ".join(command)+"\n")
+                subprocess.call(command, shell=False)
+                trimmedIontorrent.append(":".join(read1OutBase+"_P.fq", read2OutBase+"_P.fq"))
+                trimmedIontorrent.append(read1OutBase+"_U.fq")
+                trimmedIontorrent.append(read2OutBase+"_U.fq")
+
+            else:
+            # not paired
+                outBase = os.path.join(args.output_dir, os.path.basename(item))+"_trim"
+                trimLog = outBase+".log"
+                command = ["java", "-jar", args.pathToTrimmomatic, "SE", "-threads", str(args.threads), "-trimlog", trimLog]
+                command.extend([item, outBase])
+                command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
+            if args.debug:
+                sys.stderr.write("command = "+" ".join(command)+"\n")
+            subprocess.call(command, shell=False)
+            trimmedIontorrent.append(outBase)
+            args.iontorrent = trimmedIontorrent # replace original list of iontorrent reads with trimmed versions
+
 def studyReadFile(filename):
     readFileType[filename] = 'na'
     readIdSample[filename] = []
@@ -170,9 +301,9 @@ def testPairedReadIdentifiersMatch(args):
     return True
 
 def writeSpadesYamlFile(args):
-    if not os.path.isdir(args.o):
-        os.mkdir(args.o)
-    outfileName = os.path.join(args.o, "spades_yaml_file.txt")
+    if not os.path.isdir(args.output_dir):
+        os.mkdir(args.output_dir)
+    outfileName = os.path.join(args.output_dir, "spades_yaml_file.txt")
     OUT = open(outfileName, "w")
     OUT.write("[\n")
     
@@ -239,28 +370,32 @@ def writeSpadesYamlFile(args):
     return(outfileName)    
 
 def runSpades(args):
-    #if ("illumina_pe" in args or "illumina_se" in args) and ("iontorrent_pe" in args or "iontorrent_se" in args):
+    #if ("illumina_pe" in args.output_dirr "illumina_se" in args) and ("iontorrent_pe" in args or "iontorrent_se" in args):
     if args.illumina and args.iontorrent:
         raise Exception("SPAdes cannot process both Illumina and IonTorrent reads in the same run")
     testPairedReadIdentifiersMatch(args)
-    command = "spades.py --threads %d -o %s"%(args.threads, args.o)
+    command = ["spades.py", "--threads", str(args.threads), "-o", args.output_dir]
     if args.singlecell:
-        command += " --sc"
+        command.append("--sc")
     if args.iontorrent:
-        command += " --iontorrent" # tell SPAdes that this is the read type
+        command.append("--iontorrent") # tell SPAdes that this is the read type
     yamlFile = writeSpadesYamlFile(args)
-    command += " --dataset " + yamlFile
+    command.extend(["--dataset", yamlFile])
     if args.trusted_contigs:
-        command += " --trusted-contigs "+args.trusted-contigs
+        command.extend(["--trusted-contigs", args.trusted-contigs])
     if args.untrusted_contigs:
-        command += " --untrusted-contigs "+args.untrusted-contigs
+        command.extend(["--untrusted-contigs", args.untrusted-contigs])
     if args.careful:
-        command += " --careful"
+        command.append("--careful")
     if args.debug:
-        sys.stderr.write("SPAdes command =\n"+command+"\n")
+        sys.stderr.write("SPAdes command =\n"+" ".join(command)+"\n")
         sys.stderr.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     if not args.debug:
-        subprocess.call(command, shell=True)
+        subprocess.call(command, shell=False)
+    if args.quast:
+        if not args.quast_path:
+            args.quast_path = os.path.dirname(sys.argv[0]) # try directory this script is in
+        subprocess.call([os.path.join(args.quast_path, "quast.py"), "-o", "quast_out", "--gene-finding", "contigs.fasta", "scaffolds.fasta"], shell=False)
 
 def runCanu(args):
     comment = """
@@ -274,29 +409,33 @@ usage: canu [-version] [-citation] \
             [-pacbio-raw | -pacbio-corrected | -nanopore-raw | -nanopore-corrected] file1 file2 ...
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
-    tempdir = 'XXX'
-    prefix = 'YYY'
-    command = "canu -d %s -p %s gnuplotTested=true useGrid=false genomeSize=%s "%(tempdir, prefix, args.genome_size)
+    command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
     if args.pacbio:
-        command += " -pacbio-raw " + " ".join(args.pacbio) #allow multiple files
+        command.append("-pacbio-raw")
+        command.extend(args.pacbio) #allow multiple files
     if args.nanopore:
-        command += " -nanopore-raw " + " ".join(args.nanopore) #allow multiple files
+        command.append("-nanopore-raw")
+        command.extend(args.nanopore) #allow multiple files
     if args.debug:
-        sys.stderr.write("canu command =\n"+command+"\n")
+        sys.stderr.write("canu command =\n"+" ".join(command)+"\n")
         sys.stderr.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     if not args.debug:
-        subprocess.call(command, shell=True)
-
+        subprocess.call(command, shell=False)
+    if args.quast:
+        if not args.quast_path:
+            args.quast_path = os.path.dirname(sys.argv[0]) # try directory this script is in
+        subprocess.call([os.path.join(args.quast_path, "quast.py"), "-o", "quast_out", "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"], shell=False)
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-o', help='output directory.', required=True)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-o', '--output_dir', default='.', help='output directory.', required=False)
     illumina_or_iontorrent = parser.add_mutually_exclusive_group()
-    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%" between mate-pairs', required=False)
+    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%%" between mate-pairs', required=False)
     illumina_or_iontorrent.add_argument('--iontorrent', nargs='*', help='list of IonTorrent[.gz] files or pairs, ":" between paired-end-files', required=False)
     parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data', required=False)
     parser.add_argument('--pacbio', nargs='*', help='list of Pacific Biosciences fastq[.gz] or bam files "," between libraries', required=False)
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files "," between libraries', required=False)
+    parser.add_argument('--canu_prefix', default='canu', help='prefix for canu output', required=False)
     parser.add_argument('--genome_size', default=default_genome_size, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
     parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--anonymous_reads', nargs='*', help="unspecified read files, types automatically inferred.")
@@ -305,6 +444,13 @@ def main():
     parser.add_argument('--careful', action = 'store_true', help='pass careful flag to SPAdes (takes longer)', required=False)
     parser.add_argument('--threads', type=int, default=1)
     parser.add_argument('--bytes_to_sample', type=int, default=default_bytes_to_sample, help='how much to sample from read files to test file type')
+    parser.add_argument('--runTrimmomatic', action = 'store_true', help='run trimmomatic on Illumina or Iontorrent fastq files')
+    parser.add_argument('--trimmomatic_jar', default='trimmomatic.jar', help='trimmomatic jar file, with path')
+    parser.add_argument('--illuminaAdapters', default='illumina_adapters.fa', help='illumina adapters file, looked for in script directory')
+    parser.add_argument('--trimmomaticWindow', type=int, default=4, help='window width for trimming')
+    parser.add_argument('--trimmomaticMinQual', type=int, default=15, help='min score of window below which 3\' end is trimmed')
+    parser.add_argument('--quast', action = 'store_true', help='run quast for assembly quality statistics')
+    parser.add_argument('--quast_path', help='path to quast.py (excluding script name)')
     parser.add_argument('--debug', action = 'store_true', help='turn on debugging output', required=False)
     #parser.add_argument('--params', help="JSON file with additional information.")
     if len(sys.argv) == 1:
@@ -315,12 +461,13 @@ def main():
         print "args= "+str(args)
     if args.anonymous_reads:
         categorize_anonymous_read_files(args)
-    # if any illumina or iontorrent reads present, must use SPAdes (long-reads can be present), else use canu for long-reads
+    if args.runTrimmomatic:
+        runTrimmomatic(args)
+# if any illumina or iontorrent reads present, must use SPAdes (long-reads can be present), else use canu for long-reads
     if args.illumina or args.iontorrent:
         runSpades(args)
     else:
         runCanu(args)
-
 
 if __name__ == "__main__":
     main()
