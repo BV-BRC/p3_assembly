@@ -200,7 +200,7 @@ def runTrimmomatic(args):
 
 def studyReadFile(filename):
     LOG.write("studyReadFile(%s): elapsed seconds = %f\n"%(filename, time()-Start_time))
-    #return(Read_file_type[filename], Read_id_sample[filename], avg_read_length[filename])
+    #return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
     # figures out Read_file_type, collects a sample of read IDs, and average read length
     Read_file_type[filename] = 'na'
     Read_id_sample[filename] = []
@@ -221,7 +221,7 @@ def studyReadFile(filename):
         read_format = 'fastq'
     elif lines[0].startswith(">"):
         read_format = 'fasta'
-    avg_read_length[filename] = 0
+    Avg_read_length[filename] = 0
     readLengths = []
     if read_format == 'fastq':
         for i, line in enumerate(lines):
@@ -239,9 +239,9 @@ def studyReadFile(filename):
                 read = ''
             else:
                 read += line.rstrip()
-    avg_read_length[filename] = sum(readLengths)/float(len(readLengths))
-    LOG.write("found read type %s average read length %.1f\n"%(Read_file_type[filename], avg_read_length[filename]))
-    return(Read_file_type[filename], Read_id_sample[filename], avg_read_length[filename])
+    Avg_read_length[filename] = sum(readLengths)/float(len(readLengths))
+    LOG.write("found read type %s average read length %.1f\n"%(Read_file_type[filename], Avg_read_length[filename]))
+    return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
 
 def findSingleDifference(s1, s2):
 # if two strings differ in only a single position, return the chars at that pos, else return None
@@ -289,12 +289,12 @@ def categorize_anonymous_read_files(args):
                             args.iontorrent.append(":".join(pairedFiles))
                             LOG.write("appending to args.iontorrent: %s %s\n"%pairedFiles)
                         else: # neither illumina vs iontorrent, perhaps 'sra'
-                            if avg_read_length[filename1] < 500:
+                            if Avg_read_length[filename1] < 500:
                                 #call it illumina
                                 if not args.illumina:
                                     args.illumina=[]
                                 args.illumina.append(":".join(pairedFiles))
-                                LOG.write("Calling file pair %s %s, mean length %d, to be 'illumina', from %s\n"%(filename1, filename2, avg_read_length[filename1], Read_file_type[filename1]))
+                                LOG.write("Calling file pair %s %s, mean length %d, to be 'illumina', from %s\n"%(filename1, filename2, Avg_read_length[filename1], Read_file_type[filename1]))
                         membersOfPairs.add(pairedFiles[0])
                         membersOfPairs.add(pairedFiles[1])
                 except:
@@ -322,17 +322,17 @@ def categorize_anonymous_read_files(args):
                     args.nanopore = []
                 args.nanopore.append(filename)
                 LOG.write("appending to args.nanopore: %s\n"%filename)
-            elif avg_read_length[filename] < 500:
+            elif Avg_read_length[filename] < 500:
                 #call it illumina
                 if not args.illumina:
                     args.illumina=[]
                 args.illumina.append(filename)
-                LOG.write("Calling file %s, mean length %d, to be 'illumina', from %s\n"%(filename, avg_read_length[filename], Read_file_type[filename]))
+                LOG.write("Calling file %s, mean length %d, to be 'illumina', from %s\n"%(filename, Avg_read_length[filename], Read_file_type[filename]))
             else:
                 if not args.pacbio:
                     args.pacbio=[]
                 args.pacbio.append(filename)
-                LOG.write("Calling file %s, mean length %d, to be 'pacbio', from %s\n"%(filename, avg_read_length[filename], Read_file_type[filename]))
+                LOG.write("Calling file %s, mean length %d, to be 'pacbio', from %s\n"%(filename, Avg_read_length[filename], Read_file_type[filename]))
     return
 
 def fetch_sra_files(args):
