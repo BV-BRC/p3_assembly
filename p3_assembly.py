@@ -200,10 +200,10 @@ def runTrimmomatic(args):
 
 def studyReadFile(filename):
     LOG.write("studyReadFile(%s): elapsed seconds = %f\n"%(filename, time()-Start_time))
-    #return(read_file_type[filename], read_id_sample[filename], avg_read_length[filename])
-    # figures out read_file_type, collects a sample of read IDs, and average read length
-    read_file_type[filename] = 'na'
-    read_id_sample[filename] = []
+    #return(Read_file_type[filename], Read_id_sample[filename], avg_read_length[filename])
+    # figures out Read_file_type, collects a sample of read IDs, and average read length
+    Read_file_type[filename] = 'na'
+    Read_id_sample[filename] = []
     if filename.endswith("gz"):
         F = gzip.open(filename)
     else:
@@ -211,11 +211,11 @@ def studyReadFile(filename):
     text = F.read(Default_bytes_to_sample) #read X number of bytes for text sample
     F.close()
     LOG.write("  file text sample %s:\n%s\n\n"%(filename, text[0:50]))
-    read_id_sample[filename] = []
+    Read_id_sample[filename] = []
     lines = text.split("\n")
     if len(lines) < 2:
         raise Exception("text sample (length %d) lacks at least 2 lines"%len(text))
-    read_file_type[filename] = determineReadFileType(lines[0])
+    Read_file_type[filename] = determineReadFileType(lines[0])
     read_format = None
     if lines[0].startswith("@"):
         read_format = 'fastq'
@@ -226,22 +226,22 @@ def studyReadFile(filename):
     if read_format == 'fastq':
         for i, line in enumerate(lines):
             if i % 4 == 0:
-                read_id_sample[filename].append(line.split(' ')[0]) # get part up to first space, if any 
+                Read_id_sample[filename].append(line.split(' ')[0]) # get part up to first space, if any 
             elif i % 4 == 1:
                 readLengths.append(len(line)-1)
     elif read_format == 'fasta':
         read = ''
         for line in lines:
             if line.startswith(">"):
-                read_id_sample[filename].append(line[1:].split(' ')[0]) # get part after '>' and up to first space, if any 
+                Read_id_sample[filename].append(line[1:].split(' ')[0]) # get part after '>' and up to first space, if any 
                 if len(read) > 0:
                     readLengths.append(len(read))
                 read = ''
             else:
                 read += line.rstrip()
     avg_read_length[filename] = sum(readLengths)/float(len(readLengths))
-    LOG.write("found read type %s average read length %.1f\n"%(read_file_type[filename], avg_read_length[filename]))
-    return(read_file_type[filename], read_id_sample[filename], avg_read_length[filename])
+    LOG.write("found read type %s average read length %.1f\n"%(Read_file_type[filename], avg_read_length[filename]))
+    return(Read_file_type[filename], Read_id_sample[filename], avg_read_length[filename])
 
 def findSingleDifference(s1, s2):
 # if two strings differ in only a single position, return the chars at that pos, else return None
@@ -276,14 +276,14 @@ def categorize_anonymous_read_files(args):
                     elif intDiffs[1] == 1 and intDiffs[0] == 2:
                         pairedFiles = (filename2, filename1)
                     if pairedFiles:
-                        if read_file_type[filename1] != read_file_type[filename2]:
-                            LOG.write("!Discordant fileTypes for %s vs %s, %s vs %s\n"%(filename1, filename2, read_file_type[filename1], read_file_type[filename2]))
-                        if read_file_type[filename1] == 'illumina':
+                        if Read_file_type[filename1] != Read_file_type[filename2]:
+                            LOG.write("!Discordant fileTypes for %s vs %s, %s vs %s\n"%(filename1, filename2, Read_file_type[filename1], Read_file_type[filename2]))
+                        if Read_file_type[filename1] == 'illumina':
                             if not args.illumina:
                                 args.illumina = []
                             args.illumina.append(":".join(pairedFiles))
                             LOG.write("appending to args.illumina: %s %s\n"%pairedFiles)
-                        elif read_file_type[filename1] == 'iontorrent':
+                        elif Read_file_type[filename1] == 'iontorrent':
                             if not args.iontorrent:
                                 args.iontorrent = []
                             args.iontorrent.append(":".join(pairedFiles))
@@ -294,7 +294,7 @@ def categorize_anonymous_read_files(args):
                                 if not args.illumina:
                                     args.illumina=[]
                                 args.illumina.append(":".join(pairedFiles))
-                                LOG.write("Calling file pair %s %s, mean length %d, to be 'illumina', from %s\n"%(filename1, filename2, avg_read_length[filename1], read_file_type[filename1]))
+                                LOG.write("Calling file pair %s %s, mean length %d, to be 'illumina', from %s\n"%(filename1, filename2, avg_read_length[filename1], Read_file_type[filename1]))
                         membersOfPairs.add(pairedFiles[0])
                         membersOfPairs.add(pairedFiles[1])
                 except:
@@ -302,22 +302,22 @@ def categorize_anonymous_read_files(args):
 
     for filename in args.anonymous_reads:
         if filename not in membersOfPairs:
-            if read_file_type[filename1] == 'illumina':
+            if Read_file_type[filename1] == 'illumina':
                 if not args.illumina:
                     args.illumina = []
                 args.illumina.append(filename)
                 LOG.write("appending to args.illumina: %s\n"%filename)
-            elif read_file_type[filename] == 'iontorrent':
+            elif Read_file_type[filename] == 'iontorrent':
                 if not args.iontorrent:
                     args.iontorrent = []
                 args.iontorrent.append(filename)
                 LOG.write("appending to args.iontorrent: %s\n"%filename)
-            elif read_file_type[filename] == 'pacbio':
+            elif Read_file_type[filename] == 'pacbio':
                 if not args.pacbio:
                     args.pacbio = []
                 args.pacbio.append(filename)
                 LOG.write("appending to args.pacbio: %s\n"%filename)
-            elif read_file_type[filename] == 'nanopore':
+            elif Read_file_type[filename] == 'nanopore':
                 if not args.nanopore:
                     args.nanopore = []
                 args.nanopore.append(filename)
@@ -327,12 +327,12 @@ def categorize_anonymous_read_files(args):
                 if not args.illumina:
                     args.illumina=[]
                 args.illumina.append(filename)
-                LOG.write("Calling file %s, mean length %d, to be 'illumina', from %s\n"%(filename, avg_read_length[filename], read_file_type[filename]))
+                LOG.write("Calling file %s, mean length %d, to be 'illumina', from %s\n"%(filename, avg_read_length[filename], Read_file_type[filename]))
             else:
                 if not args.pacbio:
                     args.pacbio=[]
                 args.pacbio.append(filename)
-                LOG.write("Calling file %s, mean length %d, to be 'pacbio', from %s\n"%(filename, avg_read_length[filename], read_file_type[filename]))
+                LOG.write("Calling file %s, mean length %d, to be 'pacbio', from %s\n"%(filename, avg_read_length[filename], Read_file_type[filename]))
     return
 
 def fetch_sra_files(args):
@@ -389,18 +389,18 @@ def study_all_read_files(args):
             LOG.write("\tsingle char diff=%s %s\n"%(charDiffs[0], charDiffs[1]))
         else:
             LOG.write("\tno single char difference found\n")
-        if pair[0] not in read_file_type:
+        if pair[0] not in Read_file_type:
             studyReadFile(pair[0])
-        if pair[1] not in read_file_type:
+        if pair[1] not in Read_file_type:
             studyReadFile(pair[1])
-        if read_file_type[pair[0]] == read_file_type[pair[1]]:
-            LOG.write("\tinspected file types congruent: %s\n"%read_file_type[pair[0]])
-            if read_file_type[pair[0]] != fileItemType[item]:
+        if Read_file_type[pair[0]] == Read_file_type[pair[1]]:
+            LOG.write("\tinspected file types congruent: %s\n"%Read_file_type[pair[0]])
+            if Read_file_type[pair[0]] != fileItemType[item]:
                 LOG.write("\t!discrepancy with claimed type for file pair %s %s\n"%pair)
         else:
-            LOG.write("\t!inspected file types incongurent: %s vs %s\n"%(read_file_type[pair[0]], read_file_type[pair[1]]))
+            LOG.write("\t!inspected file types incongurent: %s vs %s\n"%(Read_file_type[pair[0]], Read_file_type[pair[1]]))
         allPairsMatch = True
-        for read_idPair in zip(read_id_sample[filePair[0]], read_id_sample[filePair[1]]):
+        for read_idPair in zip(Read_id_sample[filePair[0]], Read_id_sample[filePair[1]]):
             if read_idPair[0] != read_idPair[1]:
                 allPairsMatch = False
                 
@@ -408,7 +408,7 @@ def study_all_read_files(args):
 
     for filename in singleFiles:
         studyReadFile(filename)
-        if read_file_type[filename] != fileItemType[filename]:
+        if Read_file_type[filename] != fileItemType[filename]:
             LOG.write("\t!discrepancy with claimed type for file %s\n"%filename)
     return
 
