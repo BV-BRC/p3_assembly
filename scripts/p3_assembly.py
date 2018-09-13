@@ -525,10 +525,7 @@ def runSpades(args):
 
     LOG.write("Duration of SPAdes run was %f seconds\n"%(time()-spadesStartTime))
     if not args.no_quast:
-        quastExec = "quast.py"
-        if args.quast_path:
-            quastExec = os.path.join(args.quast_path, "quast.py")
-        subprocess.call([quastExec, "-o", "quast_out", "--gene-finding", "contigs.fasta", "scaffolds.fasta"], shell=False)
+        subprocess.call([args.quast_exec, "-o", "quast_out", "--gene-finding", "contigs.fasta", "scaffolds.fasta"], shell=False)
 
 def runCanu(args):
     LOG.write("runCanu: elapsed seconds = %f\n"%(time()-Start_time))
@@ -558,10 +555,7 @@ usage: canu [-version] [-citation] \
     LOG.write("Duration of canu run was %f seconds\n"%(time()-canuStartTime))
 
     if not args.no_quast:
-        quastExec = "quast.py"
-        if args.quast_path:
-            quastExec = os.path.join(args.quast_path, "quast.py")
-        quastCommand = [quastExec, "-o", "quast_out", "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"]
+        quastCommand = [args.quast_exec, "-o", "quast_out", "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         subprocess.call(quastCommand, shell=False)
 
@@ -598,7 +592,7 @@ def main():
     parser.add_argument('--trimmomaticMinQual', type=int, default=Default_window_quality, help='min score of window below which 3\' end is trimmed')
     parser.add_argument('--trimmomaticEndQual', type=int, default=Default_end_quality, help='min score at which individual 3\' bases are trimmed')
     parser.add_argument('--no_quast', action = 'store_true', help='turn off runing quast for assembly quality statistics')
-    parser.add_argument('--quast_path', help='path to quast.py (excluding script name)')
+    parser.add_argument('--quast_exec', default='quast.py', help='path to quast.py (if not on path)')
     #parser.add_argument('--params', help="JSON file with additional information.")
     if len(sys.argv) == 1:
         parser.print_help()
