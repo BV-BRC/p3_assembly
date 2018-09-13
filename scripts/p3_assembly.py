@@ -516,7 +516,7 @@ def runSpades(args):
     if not args.no_careful:
         command.append("--careful")
     if args.memory:
-        command.append("-m", str(args.memory))
+        command.extend(["-m", str(args.memory)])
     LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
