@@ -104,9 +104,6 @@ def runTrimmomatic(args):
                 read2_out_base += "_trim"
                 
                 trimLog = read1_out_base+".log"
-                #command = "java -jar %s PE -threads %d -trimlog %s "%(pathToTrimmomatic, args.threads, trimLog)
-                #command += " %s %s %s %s %s %s "%(read1, read2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq")
-                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
                 command = ["java", "-jar", pathToTrimmomatic, "PE", "-threads", str(args.threads), "-trimlog", trimLog]
                 command.extend([read1, read2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq"])
                 if os.path.isfile(illuminaAdapters):
@@ -115,7 +112,8 @@ def runTrimmomatic(args):
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
                 LOG.write("command = "+" ".join(command)+"\n")
-                subprocess.call(command, shell=False)
+                return_code = subprocess.call(command, shell=False)
+                LOG.write("return code = %d\n"%return_code)
                 trimmedIllumina.append(separator.join((read1_out_base+"_P.fq", read2_out_base+"_P.fq")))
                 trimmedIllumina.append(read1_out_base+"_U.fq")
                 trimmedIllumina.append(read2_out_base+"_U.fq")
@@ -124,9 +122,6 @@ def runTrimmomatic(args):
                 # an unpaired read file
                 outBase = os.path.join(args.output_dir, os.path.basename(item))+"_trim"
                 trimLog = outBase+".log"
-                #command = "java -jar %s SE -threads %d -trimlog %s "%(pathToTrimmomatic, args.threads, trimLog)
-                #command += " %s %s "%(item, outBase)
-                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
                 command = ["java", "-jar", pathToTrimmomatic, "SE", "-threads", str(args.threads), "-trimlog", trimLog]
                 command.extend([item, outBase])
                 if os.path.isfile(illuminaAdapters):
@@ -135,7 +130,8 @@ def runTrimmomatic(args):
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
                 LOG.write("command = "+" ".join(command)+"\n")
-                subprocess.call(command, shell=False)
+                return_code = subprocess.call(command, shell=False)
+                LOG.write("return code = %d\n"%return_code)
                 trimmedIllumina.append(outBase)
         args.illumina = trimmedIllumina # replace original list of illumina reads with trimmed versions
 
@@ -179,7 +175,8 @@ def runTrimmomatic(args):
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
                 LOG.write("command = "+" ".join(command)+"\n")
-                subprocess.call(command, shell=False)
+                return_code = subprocess.call(command, shell=False)
+                LOG.write("return code = %d\n"%return_code)
                 trimmedIontorrent.append(":".join(read1_out_base+"_P.fq", read2_out_base+"_P.fq"))
                 trimmedIontorrent.append(read1_out_base+"_U.fq")
                 trimmedIontorrent.append(read2_out_base+"_U.fq")
@@ -194,7 +191,8 @@ def runTrimmomatic(args):
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
             LOG.write("command = "+" ".join(command)+"\n")
-            subprocess.call(command, shell=False)
+            return_code = subprocess.call(command, shell=False)
+            LOG.write("return code = %d\n"%return_code)
             trimmedIontorrent.append(outBase)
             args.iontorrent = trimmedIontorrent # replace original list of iontorrent reads with trimmed versions
     LOG.write("done with runTrimmomatic: elapsed seconds = %f\n"%(time()-Start_time))
@@ -337,7 +335,8 @@ def categorize_anonymous_read_files(args):
     return
 
 def fetch_sra_files(args):
-    """Use ftp to get all SRA files.
+    """ Need to change this to call external library Zane and Andew wrote
+    Use ftp to get all SRA files.
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     Append to appropriate parts of args (e.g., args.illumina or args.iontorrent).
     """
@@ -521,11 +520,15 @@ def runSpades(args):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
 
-    subprocess.call(command, shell=False)
+    return_code = subprocess.call(command, shell=False)
+    LOG.write("return code = %d\n"%return_code)
 
     LOG.write("Duration of SPAdes run was %f seconds\n"%(time()-spadesStartTime))
     if not args.no_quast:
-        subprocess.call([args.quast_exec, "-o", "quast_out", "--gene-finding", "contigs.fasta", "scaffolds.fasta"], shell=False)
+        quastCommand = [args.quast_exec, "-o", "quast_out", "-t", str(args.threads), "--gene-finding", "contigs.fasta", "scaffolds.fasta"]
+        LOG.write("running quast: "+" ".join(quastCommand)+"\n")
+        return_code = subprocess.call(quastCommand, shell=False)
+        LOG.write("return code = %d\n"%return_code)
 
 def runCanu(args):
     LOG.write("runCanu: elapsed seconds = %f\n"%(time()-Start_time))
@@ -551,13 +554,15 @@ usage: canu [-version] [-citation] \
     #LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
 
     canuStartTime = time()
-    subprocess.call(command, shell=False)
+    return_code = subprocess.call(command, shell=False)
+    LOG.write("return code = %d\n"%return_code)
     LOG.write("Duration of canu run was %f seconds\n"%(time()-canuStartTime))
 
     if not args.no_quast:
-        quastCommand = [args.quast_exec, "-o", "quast_out", "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"]
+        quastCommand = [args.quast_exec, "-o", "quast_out", "-t", str(args.threads), "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-        subprocess.call(quastCommand, shell=False)
+        return_code = subprocess.call(quastCommand, shell=False)
+        LOG.write("return code = %d\n"%return_code)
 
 def main():
     global Path_to_lib
@@ -600,7 +605,7 @@ def main():
     args = parser.parse_args()
     logfileName = os.path.basename(sys.argv[0])
     logfileName = re.sub("\..*", "", logfileName)
-    logfileName += ".log"
+    logfileName = args.output_dir+logfileName+".log"
     global LOG 
     LOG = open(logfileName, 'w', 0) #unbuffered 
     LOG.write("starting %s\n"%sys.argv[0])
