@@ -64,12 +64,10 @@ def determineReadFileType(read_id):
 def runTrimmomatic(args):
     LOG.write("runTrimmomatic: elapsed seconds = %f\n"%(time()-Start_time))
     if args.illumina:
-        if not os.path.isfile(args.illuminaAdapters): #default illuminaAdapters is "illumina_adapters.fa", should be in same directory as this script
-            scriptDir = os.path.dirname(sys.argv[0])
-            if os.path.isfile(os.path.join(scriptDir, args.illuminaAdapters)):
-                args.illuminaAdapters = os.path.join(scriptDir, args.illuminaAdapters)
-        if os.path.exists(os.path.join(Path_to_lib, 'trimmomatic.jar')):
-	    pathToTrimmomatic = os.path.join(Path_to_lib, 'trimmomatic.jar')
+        illuminaAdapters = os.path.join(Path_to_lib, 'illumina_adapters.fa')
+	pathToTrimmomatic = os.path.join(Path_to_lib, 'trimmomatic.jar')
+        if not os.path.exists(pathToTrimmomatic):
+	    raise(Exception("No trimmomatic jar found: %s"%pathToTrimmomatic))
         trimmedIllumina = []
         for item in args.illumina:
             if ':' in item or '%' in item:
@@ -108,17 +106,17 @@ def runTrimmomatic(args):
                 trimLog = read1_out_base+".log"
                 #command = "java -jar %s PE -threads %d -trimlog %s "%(pathToTrimmomatic, args.threads, trimLog)
                 #command += " %s %s %s %s %s %s "%(read1, read2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq")
-                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(args.illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
+                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
                 command = ["java", "-jar", pathToTrimmomatic, "PE", "-threads", str(args.threads), "-trimlog", trimLog]
                 command.extend([read1, read2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq"])
-                if os.path.isfile(args.illuminaAdpaters):
-                    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters)
+                if os.path.isfile(illuminaAdapters):
+                    command.append("ILLUMINACLIP:%s:2:30:10"%illuminaAdapters)
                 command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
                 LOG.write("command = "+" ".join(command)+"\n")
                 subprocess.call(command, shell=False)
-                trimmedIllumina.append(separator.join(read1_out_base+"_P.fq", read2_out_base+"_P.fq"))
+                trimmedIllumina.append(separator.join((read1_out_base+"_P.fq", read2_out_base+"_P.fq")))
                 trimmedIllumina.append(read1_out_base+"_U.fq")
                 trimmedIllumina.append(read2_out_base+"_U.fq")
 
@@ -128,11 +126,11 @@ def runTrimmomatic(args):
                 trimLog = outBase+".log"
                 #command = "java -jar %s SE -threads %d -trimlog %s "%(pathToTrimmomatic, args.threads, trimLog)
                 #command += " %s %s "%(item, outBase)
-                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(args.illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
+                #command += " ILLUMINACLIP:%s:2:30:10 SLIDINGWINDOW:%d:%d"%(illuminaAdapters, args.trimmomaticWindow, args.trimmomaticMinQual)
                 command = ["java", "-jar", pathToTrimmomatic, "SE", "-threads", str(args.threads), "-trimlog", trimLog]
                 command.extend([item, outBase])
-                if os.path.isfile(args.illuminaAdpaters):
-                    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters)
+                if os.path.isfile(illuminaAdapters):
+                    command.append("ILLUMINACLIP:%s:2:30:10"%illuminaAdapters)
                 command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
                 command.append("LEADING:%d"%(args.trimmomaticEndQual))
                 command.append("TRAILING:%d"%(args.trimmomaticEndQual))
@@ -446,11 +444,15 @@ def writeSpadesYamlFile(args):
             mate_pair_reads[1].append(f)
         else:
             single_end_reads.append(os.path.abspath(item))
+    precedingElement=False
     if len(single_end_reads):
         OUT.write("  {\n    type: \"single\",\n    single reads: [\n        \"")
         OUT.write("\",\n        \"".join(single_end_reads))
         OUT.write("\"\n    ]\n  }\n")
+	precedingElement=True
     if len(paired_end_reads[0]):
+	if precedingElement:
+	    OUT.write(",\n")
         OUT.write("  {\n    orientation: \"fr\",\n")
         OUT.write("    type: \"paired-end\",\n")
         OUT.write("    right reads: [\n        \""+"\",\n        \"".join(paired_end_reads[0]))
@@ -458,7 +460,10 @@ def writeSpadesYamlFile(args):
         OUT.write("    left reads: [\n        \""+"\",\n        \"".join(paired_end_reads[1]))
         OUT.write("\"\n    ]\n")
         OUT.write("  }\n")
+	precedingElement=True
     if len(mate_pair_reads[0]):
+	if precedingElement:
+	    OUT.write(",\n")
         OUT.write("  {\n    orientation: \"rf\",\n")
         OUT.write("    type: \"mate-pairs\",\n")
         OUT.write("    right reads: [\n        \""+"\",\n        \"".join(mate_pair_reads[0]))
@@ -466,20 +471,27 @@ def writeSpadesYamlFile(args):
         OUT.write("    left reads: [\n        \""+"\",\n        \"".join(mate_pair_reads[1]))
         OUT.write("\"\n    ]\n")
         OUT.write("  }\n")
+	precedingElement=True
     if args.pacbio:
         pacbio_reads = []
         for f in args.pacbio:
             pacbio_reads.append(os.path.abspath(f))
+	if precedingElement:
+	    OUT.write(",\n")
         OUT.write("  {\n    type: \"pacbio\",\n    single reads: [\n        \"")
         OUT.write("\",\n        \"".join(pacbio_reads))
         OUT.write("\"\n    ]\n  }\n")
+	precedingElement=True
     if args.nanopore:
         nanopore_reads = []
         for f in args.nanopore:
             nanopore_reads.append(os.path.abspath(f))
+	if precedingElement:
+	    OUT.write(",\n")
         OUT.write("  {\n    type: \"nanopore\",\n    single reads: [\n        \"")
         OUT.write("\",\n        \"".join(nanopore_reads))
         OUT.write("\"\n    ]\n  }\n")
+	precedingElement=True
 
     OUT.write("]\n")
     OUT.close()
@@ -552,7 +564,10 @@ usage: canu [-version] [-citation] \
         subprocess.call(quastCommand, shell=False)
 
 def main():
+    global Path_to_lib
     Path_to_lib = os.path.dirname(sys.argv[0])
+    Path_to_lib = "/".join(Path_to_lib.split("/")[:-1])
+    Path_to_lib += "/lib"
     global Start_time
     Start_time = time()
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
