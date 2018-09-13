@@ -515,6 +515,8 @@ def runSpades(args):
         command.extend(["--untrusted-contigs", args.untrusted-contigs])
     if not args.no_careful:
         command.append("--careful")
+    if args.memory:
+        command.append("-m", str(args.memory))
     LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
@@ -586,7 +588,8 @@ def main():
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
     parser.add_argument('--no_careful', action = 'store_true', help='turn off careful flag to SPAdes (faster)', required=False)
-    parser.add_argument('--threads', type=int, default=4)
+    parser.add_argument('-t', '--threads', type=int, default=4)
+    parser.add_argument('-o', '--memory', type=int, help='RAM limit for SPAdes in Gb', default=250)
     parser.add_argument('--bytes_to_sample', type=int, default=Default_bytes_to_sample, help='how much to sample from read files to test file type')
     parser.add_argument('--runTrimmomatic', action = 'store_true', help='run trimmomatic on Illumina or Iontorrent fastq files')
     #parser.add_argument('--trimmomatic_jar', default='trimmomatic.jar', help='trimmomatic jar file, with path')
