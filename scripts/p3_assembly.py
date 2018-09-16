@@ -197,6 +197,66 @@ def runTrimmomatic(args):
             args.iontorrent = trimmedIontorrent # replace original list of iontorrent reads with trimmed versions
     LOG.write("done with runTrimmomatic: elapsed seconds = %f\n"%(time()-Start_time))
 
+def verifyReadPairing(readFile1, readFile2):
+    """ Read both files, write 3 new files: paired1, paired2, unpaired
+    return tuple with 3 file names
+    """
+    if readFile1.lower().endswith(".gz"):
+        F = gzip.open(readFile1)
+    else:
+        F = open(readFile1)
+    i = 0
+    id = None
+    seqqual = '' # for 3-line record of sequence and quality
+    for line in F:
+        if i % 4 == 0:
+            if id:
+                read1[id] = seqqual
+            seqqual = ''
+            id = line.split()[0]
+        else:
+            seqqual += line
+        i += 1
+    F.close()
+
+    return_value = ['a', 'b', 'c'] # list of file names, paired1, paired2, unpaired
+    basename = os.path.basename(readFiles1)
+    return_value[0] = basename + "_paired.fq"
+    return_value[2] = basename + "_reads12_unpaired.fq"
+    basename = os.path.basename(readFile2)
+    return_value[1] = basename + "_paired.fq"
+    PairedOut1 = open(return_value[0], 'w')
+    PairedOut2 = open(return_value[1], 'w')
+    UnpairedOut = open(return_value[2], 'w')
+
+    if readFile2.lower().endswith(".gz"):
+        F = gzip.open(readFile2)
+    else:
+        F = open(readFile2)
+    i = 0
+    found = False
+    for line in F:
+        if i % 4 == 0:
+            id = line.split()[0]
+            found = id in read1
+            if found:
+                PairedOut1.write(id+"\n"+read1[id])
+                PairedOut2.write(line)
+                del read1[id]
+            else:
+                UnpairedOut.write(line)
+        else:
+            if found:
+                PairedOut2.write(line)
+            else:
+                UnpairedOut.write(line)
+        i += 1
+
+    for id in read1:
+        UnpairedOut.write(id+"\n"+read1[id])
+    return return_value
+
+
 def studyReadFile(filename):
     LOG.write("studyReadFile(%s): elapsed seconds = %f\n"%(filename, time()-Start_time))
     #return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
