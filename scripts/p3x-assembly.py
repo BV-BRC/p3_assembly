@@ -6,13 +6,16 @@ import gzip
 import os
 import os.path
 import re
+import shutil
+import urllib2
 from time import time, localtime, strftime
 
 """
 This script organizes a command line for either 
-SPAdes or canu as appropriate (canu if pacbio 
-or nanopore, spades if illumina or iontorrent 
-(and SPAdes for hybrid assemblies, eg Illumina plus PacBio))
+SPAdes or canu as appropriate: 
+    canu if pacbio or nanopore, 
+    spades if illumina or iontorrent 
+    and SPAdes for hybrid assemblies, eg Illumina plus PacBio
 It can auto-detect read types (illumina, iontorrent, pacbio, nanopore)
 It can run Trimmomatic prior to assembling.
 It can run Quast to generate assembly quality statistics.
@@ -340,10 +343,61 @@ def fetch_sra_files(args):
     if not args.sra:
         return
     for sra in args.sra:
-        url = "ftp://ftp-trace.ncbi.nih.gov/sra/sra-instant/reads/ByRun/sra/%s/%s/%s/%s.sra"%(sra[:3], sra[:6], sra, sra)
-        wget.download(url, sra+".sra")
-        subprocess.run(["fastq-dump", "--split-files", "-B", sra+".sra"], shell=False)
-        subprocess.popen(["esearch",  "-db", "sra", "-query", sra], shell=False)
+
+        if sra.endswith(".sra"):
+            sra = sra[:-4] # trim off trailing ".sra", will later detect presence of "xxx.sra" file if it exists
+
+        #https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term=ERR657661
+        runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+sra
+        r = urllib2.urlopen(runinfo_url)
+        
+        runinfo = {}
+        lines = r.read().split("\n")
+        LOG.write("Got runinfo:\n"+'\n'.join(lines)+"\n")
+        values = lines[1].split(",")
+        for i, field in enumerate(lines[0].split(",")):
+            runinfo[field] = values[i]
+        if runinfo['Platform'] == 'PACBIO_SMRT':
+            if not args.pacbio:
+                args.pacbio = []
+            listToAddTo = args.pacbio
+        elif runinfo['Platform'] == "ILLUMINA":
+            if not args.illumina:
+                args.illumina = []
+            listToAddTo = args.illumina
+        elif runinfo['Platform'] == "ION_TORRENT":
+            if not args.iontorrent:
+                args.iontorrent = []
+            listToAddTo = args.iontorrent
+        elif runinfo['Platform'] == "OXFORD_NANOPORE":
+            if not args.nanopore:
+                args.nanopore = []
+            listToAddTo = args.nanopore
+        else:
+            raise Exception("Problem: Cannot process sra data from platform %s\n"%runinfo['Platform'])
+
+        if not os.path.exists(sra+".sra"):
+            sra_file_url = "ftp://ftp-trace.ncbi.nih.gov/sra/sra-instant/reads/ByRun/sra/%s/%s/%s/%s.sra"%(sra[:3], sra[:6], sra, sra)
+            LOG.write("downloading %s\n"%sra_file_url)
+
+            with open(sra+".sra", 'wb') as OUT:
+                response = urllib2.urlopen(sra_file_url)
+                shutil.copyfileobj(response, OUT)
+
+        if not os.path.exists(sra+".sra"):
+            raise Exception("Problem: file %s.sra does not exist after trying to download %s\n"%(sra, sra_file_url))
+
+        if runinfo['LibraryLayout'].startswith("SINGLE"):
+            subprocess.call(["fastq-dump", sra+".sra"], shell=False)
+            if not os.path.exists(sra+".fastq"):
+                raise Exception("Problem: file %s.fastq does not exist after running fastq-dump on %s.sra\n"%(sra, sra))
+            listToAddTo.append(sra+".fastq")
+        elif runinfo['LibraryLayout'].startswith("PAIRED"):
+            subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
+            if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
+                raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
+            listToAddTo.append(sra+"_1.fastq")
+            listToAddTo.append(sra+"_2.fastq")
     return
 
 def study_all_read_files(args):
@@ -614,7 +668,7 @@ def main():
         categorize_anonymous_read_files(args)
 # if any illumina or iontorrent reads present, must use SPAdes (long-reads can be present), else use canu for long-reads
     if args.sra:
-        fetchSraData(args)
+        fetch_sra_files(args)
     study_all_read_files(args)
     if args.illumina or args.iontorrent:
         for fileList in (args.illumina, args.iontorrent):
