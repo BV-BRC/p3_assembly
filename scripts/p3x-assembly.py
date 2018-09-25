@@ -560,9 +560,9 @@ def runSpades(args):
     yamlFile = writeSpadesYamlFile(args)
     command.extend(["--dataset", yamlFile])
     if args.trusted_contigs:
-        command.extend(["--trusted-contigs", args.trusted-contigs])
+        command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
-        command.extend(["--untrusted-contigs", args.untrusted-contigs])
+        command.extend(["--untrusted-contigs", args.untrusted_contigs])
     if not args.no_careful:
         command.append("--careful")
     if args.memory:
