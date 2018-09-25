@@ -575,11 +575,14 @@ def runSpades(args):
     LOG.write("return code = %d\n"%return_code)
 
     LOG.write("Duration of SPAdes run was %f seconds\n"%(time()-spadesStartTime))
+    pwd = os.getcwd()
+    os.chdir(args.output_dir)
     if not args.no_quast:
         quastCommand = [args.quast_exec, "-o", "quast_out", "-t", str(args.threads), "--gene-finding", "contigs.fasta", "scaffolds.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
+    os.chdir(pwd)
 
 def runCanu(args):
     LOG.write("runCanu: elapsed seconds = %f\n"%(time()-Start_time))
