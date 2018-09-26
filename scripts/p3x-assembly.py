@@ -701,7 +701,7 @@ def main():
         sys.exit(2)
     args = parser.parse_args()
     if args.logfile:
-        logfileName = os.path.abspath(argslogfile)
+        logfileName = os.path.abspath(args.logfile)
     else:
         logfileName = os.path.basename(sys.argv[0])
         logfileName = logfileName.replace(".py", "")
