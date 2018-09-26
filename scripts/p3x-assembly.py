@@ -477,7 +477,7 @@ def writeSpadesYamlFile(args):
     OUT.write("[\n")
     
     LOG.write("illumina: "+", ".join(args.illumina)+"\n")
-    LOG.write("iontorrent: "+", ".join(args.illumina)+"\n")
+    LOG.write("iontorrent: "+", ".join(args.iontorrent)+"\n")
     single_end_reads = []
     paired_end_reads = [[], []]
     mate_pair_reads = [[], []]
