@@ -405,8 +405,7 @@ def fetch_sra_files(args):
             #subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
             if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
                 raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
-            listToAddTo.append(sra+"_1.fastq")
-            listToAddTo.append(sra+"_2.fastq")
+            listToAddTo.append(sra+"_1.fastq:"+sra+"_2.fastq") 
     return
 
 def study_all_read_files(args):
@@ -605,6 +604,10 @@ usage: canu [-version] [-citation] \
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
+    command.extend(["maxMemory", str(args.memory), "maxThreads", str(args.threads)])
+    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
+            "cns"):
+        command.extend([prefix+"Concurrency", "1"])
     if args.pacbio:
         command.append("-pacbio-raw")
         command.extend(args.pacbio) #allow multiple files
@@ -649,7 +652,7 @@ def main():
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
     parser.add_argument('--no_careful', action = 'store_true', help='turn off careful flag to SPAdes (faster)', required=False)
     parser.add_argument('-t', '--threads', metavar='cpus', type=int, default=4)
-    parser.add_argument('-m', '--memory', metavar='GB', type=int, help='RAM limit for SPAdes in Gb', default=250)
+    parser.add_argument('-m', '--memory', metavar='GB', type=int, help='RAM limit for SPAdes in Gb', default=125)
     parser.add_argument('--bytes_to_sample', metavar='bytes', type=int, default=Default_bytes_to_sample, help='how much to sample from read files to test file type')
     parser.add_argument('--runTrimmomatic', action = 'store_true', help='run trimmomatic on Illumina or Iontorrent fastq files')
     #parser.add_argument('--trimmomatic_jar', default='trimmomatic.jar', help='trimmomatic jar file, with path')
@@ -693,7 +696,7 @@ def main():
                         processedFileList.append(trimmedUnpaired)
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
-                        processedFileList.append(verifiedPari)
+                        processedFileList.append(verifiedPair)
                         processedFileList.append(unpaired)
                 else:
                     if args.runTrimmomatic:
