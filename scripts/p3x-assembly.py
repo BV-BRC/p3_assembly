@@ -403,8 +403,7 @@ def fetch_sra_files(args):
             #subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
             if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
                 raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
-            listToAddTo.append(sra+"_1.fastq")
-            listToAddTo.append(sra+"_2.fastq")
+            listToAddTo.append(sra + "_1.fastq:" + sra +"_2.fastq")
     return
 
 def study_all_read_files(args):
@@ -691,7 +690,7 @@ def main():
                         processedFileList.append(trimmedUnpaired)
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
-                        processedFileList.append(verifiedPari)
+                        processedFileList.append(verifiedPair)
                         processedFileList.append(unpaired)
                 else:
                     if args.runTrimmomatic:
