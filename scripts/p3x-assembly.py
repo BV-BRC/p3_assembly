@@ -9,6 +9,7 @@ import re
 import shutil
 import urllib2
 from time import time, localtime, strftime
+import json
 
 import sra_tools
 
@@ -335,7 +336,7 @@ def categorize_anonymous_read_files(args):
                 LOG.write("Calling file %s, mean length %d, to be 'pacbio', from %s\n"%(filename, Avg_read_length[filename], Read_file_type[filename]))
     return
 
-def fetch_sra_files(args):
+def fetch_sra_files(args, details):
     """ Need to change this to call external library Zane and Andew wrote
     Use ftp to get all SRA files.
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
@@ -406,7 +407,7 @@ def fetch_sra_files(args):
             listToAddTo.append(sra + "_1.fastq:" + sra +"_2.fastq")
     return
 
-def study_all_read_files(args):
+def study_all_read_files(args, details):
     LOG.write("study_all_read_files: elapsed seconds = %f\n"%(time()-Start_time))
     fileItemType={}
     filePairs=[]
@@ -554,7 +555,7 @@ def writeSpadesYamlFile(args):
     OUT.close()
     return(outfileName)    
 
-def runSpades(args):
+def runSpades(args, details):
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-Start_time))
     #if ("illumina_pe" in args.output_dirr "illumina_se" in args) and ("iontorrent_pe" in args or "iontorrent_se" in args):
     if args.illumina and args.iontorrent:
@@ -567,9 +568,9 @@ def runSpades(args):
     yamlFile = writeSpadesYamlFile(args)
     command.extend(["--dataset", yamlFile])
     if args.trusted_contigs:
-        command.extend(["--trusted-contigs", args.trusted-contigs])
+        command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
-        command.extend(["--untrusted-contigs", args.untrusted-contigs])
+        command.extend(["--untrusted-contigs", args.untrusted_contigs])
     if not args.no_careful:
         command.append("--careful")
     if args.memory:
@@ -581,16 +582,41 @@ def runSpades(args):
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
 
-    LOG.write("Duration of SPAdes run was %f seconds\n"%(time()-spadesStartTime))
+    spadesEndTime = time()
+    elapsedTime = spadesEndTime - spadesStartTime
+
+    manifest = []
+    details.update( { 'start_time': spadesStartTime,
+                'end_time': spadesEndTime,
+                'elapsed_time' : elapsedTime,
+                'assembler': 'spades',
+                'command_line': command,
+                'output_files': manifest,
+                'output_path': os.path.abspath(args.output_dir)
+                })
+    manifest.append(['scaffolds.fasta', 'fasta', 'Generated scaffolds'])
+    manifest.append(['contigs.fasta', 'fasta', 'Generated contigs'])
+    manifest.append(['assembly_graph.gfa', 'gfa', 'Assembly graph'])
+    manifest.append(['assembly_graph_with_scaffolds.gfa', 'gfa', 'Assembly graph'])
+    manifest.append(['assembly_graph.fastg', 'fastg', 'Assembly graph'])
+    manifest.append(['contigs.paths', 'txt', 'paths in the assembly graph corresponding to contigs.fasta'])
+    manifest.append(['scaffolds.paths', 'txt', 'paths in the assembly graph corresponding to scaffolds.fasta'])
+    manifest.append(['assembly_graph.gfa', 'gfa', 'Assembly graph'])
+    manifest.append(['warnings.log', 'txt', 'Spades Assembly warnings'])
+    manifest.append(['spades.log', 'txt', 'Spades logfile'])
+    
+    LOG.write("Duration of SPAdes run was %f seconds\n"%(elapsedTime))
     if not args.no_quast:
-        quastCommand = [args.quast_exec, "-o", args.output_dir + "/quast_out", "-t", str(args.threads), "--gene-finding",
+        qout = os.path.abspath(os.path.join(args.output_dir, "quast_out"))
+        quastCommand = [args.quast_exec, "-o", qout, "-t", str(args.threads), "--gene-finding",
                         args.output_dir + "/contigs.fasta",
                         args.output_dir + "/scaffolds.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
+        details['quast_path'] = qout
 
-def runCanu(args):
+def runCanu(args, details):
     LOG.write("runCanu: elapsed seconds = %f\n"%(time()-Start_time))
     comment = """
 usage: canu [-version] [-citation] \
@@ -639,8 +665,8 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output_dir', default='.', help='output directory.', required=False)
     illumina_or_iontorrent = parser.add_mutually_exclusive_group()
-    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%%" between mate-pairs', required=False)
-    illumina_or_iontorrent.add_argument('--iontorrent', nargs='*', help='list of IonTorrent[.gz] files or pairs, ":" between paired-end-files', required=False)
+    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%%" between mate-pairs', required=False, default=[])
+    illumina_or_iontorrent.add_argument('--iontorrent', nargs='*', help='list of IonTorrent[.gz] files or pairs, ":" between paired-end-files', required=False, default=[])
     parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--pacbio', nargs='*', help='list of Pacific Biosciences fastq[.gz] or bam files', required=False)
     parser.add_argument('--sra', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
@@ -663,6 +689,7 @@ def main():
     parser.add_argument('--trimmomaticEndQual', metavar="phred", type=int, default=Default_end_quality, help='score at which individual 3\' bases are trimmed')
     parser.add_argument('--no_quast', action = 'store_true', help='turn off runing quast for assembly quality statistics')
     parser.add_argument('--quast_exec', default='quast.py', help='path to quast.py (if not on path)')
+    parser.add_argument('--run-details', help='JSON-format document describing details of the run', required=False)
     #parser.add_argument('--params', help="JSON file with additional information.")
     if len(sys.argv) == 1:
         parser.print_help()
@@ -677,12 +704,14 @@ def main():
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(Start_time))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
+
+    details = { 'logfile' : logfileName }
     if args.anonymous_reads:
         categorize_anonymous_read_files(args)
 # if any illumina or iontorrent reads present, must use SPAdes (long-reads can be present), else use canu for long-reads
     if args.sra:
-        fetch_sra_files(args)
-    study_all_read_files(args)
+        fetch_sra_files(args, details)
+    study_all_read_files(args, details)
     if args.illumina or args.iontorrent:
         for fileList in (args.illumina, args.iontorrent):
             if not fileList:
@@ -709,11 +738,16 @@ def main():
                 args.illumina = processedFileList
             else:
                 args.iontorrent = processedFileList
-        runSpades(args)
+        runSpades(args, details)
     else:
-        runCanu(args)
+        runCanu(args, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
+    if args.run_details:
+        fp = file(args.run_details, "w")
+        json.dump(details, fp, ident=2)
+        fp.close()
+
 
 if __name__ == "__main__":
     main()
