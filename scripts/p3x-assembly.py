@@ -583,7 +583,9 @@ def runSpades(args):
 
     LOG.write("Duration of SPAdes run was %f seconds\n"%(time()-spadesStartTime))
     if not args.no_quast:
-        quastCommand = [args.quast_exec, "-o", "quast_out", "-t", str(args.threads), "--gene-finding", "contigs.fasta", "scaffolds.fasta"]
+        quastCommand = [args.quast_exec, "-o", args.output_dir + "/quast_out", "-t", str(args.threads), "--gene-finding",
+                        args.output_dir + "/contigs.fasta",
+                        args.output_dir + "/scaffolds.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
@@ -617,7 +619,12 @@ usage: canu [-version] [-citation] \
     LOG.write("Duration of canu run was %f seconds\n"%(time()-canuStartTime))
 
     if not args.no_quast:
-        quastCommand = [args.quast_exec, "-o", "quast_out", "-t", str(args.threads), "--gene-finding", args.canu_prefix+".contigs.fasta", args.canu_prefix+".unitigs.fasta"]
+        quastCommand = [args.quast_exec,
+                        "-o", args.output_dir + "/quast_out",
+                        "-t", str(args.threads),
+                        "--gene-finding",
+                        args.canu_prefix+".contigs.fasta",
+                        args.canu_prefix+".unitigs.fasta"]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
