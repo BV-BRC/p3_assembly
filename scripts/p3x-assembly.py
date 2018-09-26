@@ -690,14 +690,18 @@ def main():
     parser.add_argument('--no_quast', action = 'store_true', help='turn off runing quast for assembly quality statistics')
     parser.add_argument('--quast_exec', default='quast.py', help='path to quast.py (if not on path)')
     parser.add_argument('--run-details', help='JSON-format document describing details of the run', required=False)
+    parser.add_argument('--logfile', help='Log file', required=False)
     #parser.add_argument('--params', help="JSON file with additional information.")
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(2)
     args = parser.parse_args()
-    logfileName = os.path.basename(sys.argv[0])
-    logfileName = logfileName.replace(".py", "")
-    logfileName = os.path.join(args.output_dir, logfileName)+".log"
+    if args.logfile:
+        logfileName = os.path.abspath(argslogfile)
+    else:
+        logfileName = os.path.basename(sys.argv[0])
+        logfileName = logfileName.replace(".py", "")
+        logfileName = os.path.join(args.output_dir, logfileName)+".log"
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
     LOG = open(logfileName, 'w', 0) #unbuffered 
