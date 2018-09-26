@@ -10,7 +10,6 @@ import shutil
 import urllib2
 from time import time, localtime, strftime
 import json
-
 import sra_tools
 
 """
@@ -52,6 +51,7 @@ def determineReadFileType(read_id):
     if re.match(r"@[A-Z]\S+:\d+:\S+:\d+:\d+:\d+:\d+ \S+:\S+:\S+:\S+$", read_id):
         return "illumina" # newer illumina
     if re.match(r"@\S+:\S+:\S+:\S+:\S+#\S+/\S+$", read_id):
+      
         return "illumina" # older illumina
     if re.match(r"@\S+:\S+:\S+$", read_id):
         return "iontorrent" # 
@@ -630,6 +630,10 @@ usage: canu [-version] [-citation] \
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
+    command.extend(["maxMemory", str(args.memory), "maxThreads", str(args.threads)])
+    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
+            "cns"):
+        command.extend([prefix+"Concurrency", "1"])
     if args.pacbio:
         command.append("-pacbio-raw")
         command.extend(args.pacbio) #allow multiple files
@@ -751,4 +755,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+ 
