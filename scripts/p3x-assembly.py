@@ -10,9 +10,7 @@ import shutil
 import urllib2
 from time import time, localtime, strftime
 
-p3_sra_path = os.path.dirname(sys.argv[0]).replace("p3_assembly/scripts", "sra_import")
-sys.path.append(p3_sra_path)
-import p3_sra
+import sra_tools
 
 """
 This script organizes a command line for either 
@@ -351,7 +349,7 @@ def fetch_sra_files(args):
         if sra.endswith(".sra"):
             sra = sra[:-4] # trim off trailing ".sra", will later detect presence of "xxx.sra" file if it exists
 
-        runinfo = p3_sra.get_runinfo(sra)
+        runinfo = sra_tools.get_runinfo(sra)
         """moved to p3-sra module
         runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+sra
         r = urllib2.urlopen(runinfo_url)
@@ -383,7 +381,7 @@ def fetch_sra_files(args):
 
         if not os.path.exists(sra+".sra"):
             LOG.write("downloading %s\n"%sra)
-            p3_sra.ftp_download_single_run(sra)
+            sra_tools.ftp_download_single_run(sra)
             """ moved to sra_import/p3_sra.py
             sra_file_url = "ftp://ftp-trace.ncbi.nih.gov/sra/sra-instant/reads/ByRun/sra/%s/%s/%s/%s.sra"%(sra[:3], sra[:6], sra, sra)
             with open(sra+".sra", 'wb') as OUT:
@@ -395,13 +393,13 @@ def fetch_sra_files(args):
             raise Exception("Problem: file %s.sra does not exist after trying to download %s\n"%(sra, sra_file_url))
 
         if runinfo['LibraryLayout'].startswith("SINGLE"):
-            p3_sra.fastqDumpExistingSraFile(sra+".sra", splitFiles=False)
+            sra_tools.fastqDumpExistingSraFile(sra+".sra", splitFiles=False)
             #subprocess.call(["fastq-dump", sra+".sra"], shell=False)
             if not os.path.exists(sra+".fastq"):
                 raise Exception("Problem: file %s.fastq does not exist after running fastq-dump on %s.sra\n"%(sra, sra))
             listToAddTo.append(sra+".fastq")
         elif runinfo['LibraryLayout'].startswith("PAIRED"):
-            p3_sra.fastqDumpExistingSraFile(sra+".sra", splitFiles=True)
+            sra_tools.fastqDumpExistingSraFile(sra+".sra", splitFiles=True)
             #subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
             if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
                 raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
