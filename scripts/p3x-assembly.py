@@ -74,7 +74,7 @@ def trimPairedReads(readPair, args, illumina=False):
     LOG.write("trimPairedReads: elapsed seconds = %f\n"%(time()-Start_time))
     m = re.match("^(.+)([%:])(.+)", readPair)
     if not m:
-        raise Exception("verifyReadPairing cannot split readPair: "+readPair)
+        raise Exception("trimPairedReads cannot split readPair: "+readPair)
     readFile1, separator, readFile2 = m.groups()
     read1_out_base = os.path.basename(readFile1)
     read1_out_base = read1_out_base.split(".")[0]
@@ -158,6 +158,8 @@ def verifyReadPairing(readPair, output_dir):
             seqqual += line
         i += 1
     F.close()
+    if id:
+        read1[id] = seqqual
 
     basename = os.path.join(output_dir, os.path.basename(readFile1))
     verifiedPairedFile1 = basename + "_paired.fq"
@@ -343,24 +345,16 @@ def fetch_sra_files(args, details):
     Append to appropriate parts of args (e.g., args.illumina or args.iontorrent).
     """
     LOG.write("fetch_sra_files: elapsed seconds = %f\n"%(time()-Start_time))
+    LOG.write("fetch_sra_files() args.sra="+" ".join(args.sra)+"\n")
     if not args.sra:
         return
     for sra in args.sra:
-
+        sra_dir = ""
         if sra.endswith(".sra"):
+            sra_dir, sra = os.path.split(sra)
             sra = sra[:-4] # trim off trailing ".sra", will later detect presence of "xxx.sra" file if it exists
 
         runinfo = sra_tools.get_runinfo(sra)
-        """moved to p3-sra module
-        runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+sra
-        r = urllib2.urlopen(runinfo_url)
-        
-        runinfo = {}
-        lines = r.read().split("\n")
-        LOG.write("Got runinfo:\n"+'\n'.join(lines)+"\n")
-        values = lines[1].split(",")
-        for i, field in enumerate(lines[0].split(",")):
-            runinfo[field] = values[i]"""
         if runinfo['Platform'] == 'PACBIO_SMRT':
             if not args.pacbio:
                 args.pacbio = []
@@ -380,27 +374,21 @@ def fetch_sra_files(args, details):
         else:
             raise Exception("Problem: Cannot process sra data from platform %s\n"%runinfo['Platform'])
 
-        if not os.path.exists(sra+".sra"):
+        if not os.path.exists(os.path.join(sra_dir, sra+".sra")):
             LOG.write("downloading %s\n"%sra)
             sra_tools.ftp_download_single_run(sra)
-            """ moved to sra_import/p3_sra.py
-            sra_file_url = "ftp://ftp-trace.ncbi.nih.gov/sra/sra-instant/reads/ByRun/sra/%s/%s/%s/%s.sra"%(sra[:3], sra[:6], sra, sra)
-            with open(sra+".sra", 'wb') as OUT:
-                response = urllib2.urlopen(sra_file_url)
-                shutil.copyfileobj(response, OUT)
-            """
 
-        if not os.path.exists(sra+".sra"):
+        if not os.path.exists(os.path.join(sra_dir, sra+".sra")):
             raise Exception("Problem: file %s.sra does not exist after trying to download %s\n"%(sra, sra_file_url))
 
         if runinfo['LibraryLayout'].startswith("SINGLE"):
-            sra_tools.fastqDumpExistingSraFile(sra+".sra", splitFiles=False)
+            sra_tools.fastqDumpExistingSraFile(os.path.join(sra_dir, sra+".sra"), splitFiles=False)
             #subprocess.call(["fastq-dump", sra+".sra"], shell=False)
             if not os.path.exists(sra+".fastq"):
                 raise Exception("Problem: file %s.fastq does not exist after running fastq-dump on %s.sra\n"%(sra, sra))
             listToAddTo.append(sra+".fastq")
         elif runinfo['LibraryLayout'].startswith("PAIRED"):
-            sra_tools.fastqDumpExistingSraFile(sra+".sra", splitFiles=True)
+            sra_tools.fastqDumpExistingSraFile(os.path.join(sra_dir, sra+".sra"), splitFiles=True)
             #subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
             if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
                 raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
@@ -759,3 +747,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
