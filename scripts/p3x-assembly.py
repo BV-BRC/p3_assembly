@@ -305,7 +305,7 @@ def categorize_anonymous_read_files(args):
 
     for filename in args.anonymous_reads:
         if filename not in membersOfPairs:
-            if Read_file_type[filename1] == 'illumina':
+            if Read_file_type[filename] == 'illumina':
                 if not args.illumina:
                     args.illumina = []
                 args.illumina.append(filename)
