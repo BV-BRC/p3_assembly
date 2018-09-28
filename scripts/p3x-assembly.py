@@ -618,10 +618,10 @@ usage: canu [-version] [-citation] \
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
-    command.extend(["maxMemory", str(args.memory), "maxThreads", str(args.threads)])
+    command.extend(["maxMemory=" + str(args.memory), "maxThreads=" + str(args.threads)])
     for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
             "cns"):
-        command.extend([prefix+"Concurrency", "1"])
+        command.append(prefix+"Concurrency=1")
     if args.pacbio:
         command.append("-pacbio-raw")
         command.extend(args.pacbio) #allow multiple files
