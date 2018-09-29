@@ -619,9 +619,20 @@ usage: canu [-version] [-citation] \
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
     command.extend(["maxMemory=" + str(args.memory), "maxThreads=" + str(args.threads)])
-    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
-            "cns"):
-        command.append(prefix+"Concurrency=1")
+    """
+
+    The 'minMemory', 'maxMemory', 'minThreads' and 'maxThreads'
+    options will apply to all jobs, and can be used to artificially
+    limit canu to a portion of the current machine. In the overlapper
+    example above, setting maxThreads=4 would result in two concurrent
+    jobs instead of four.
+
+    https://canu.readthedocs.io/en/latest/parameter-reference.html
+    """
+
+#    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
+#            "cns"):
+#        command.append(prefix+"Concurrency=1")
     if args.pacbio:
         command.append("-pacbio-raw")
         command.extend(args.pacbio) #allow multiple files
@@ -723,7 +734,8 @@ def main():
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
                         processedFileList.append(verifiedPair)
-                        processedFileList.append(unpaired)
+                        if os.stat(unpaired).st_size > 0:
+                            processedFileList.append(unpaired)
                 else:
                     if args.runTrimmomatic:
                         trimmedSingleReads = trimSingleReads(item, args, illumina=(fileList == args.illumina))
