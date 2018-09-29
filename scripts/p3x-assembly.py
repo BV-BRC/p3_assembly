@@ -753,7 +753,7 @@ def main():
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     if args.run_details:
         fp = file(args.run_details, "w")
-        json.dump(details, fp, ident=2)
+        json.dump(details, fp, indent=2)
         fp.close()
 
 
