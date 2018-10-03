@@ -305,7 +305,7 @@ def categorize_anonymous_read_files(args):
 
     for filename in args.anonymous_reads:
         if filename not in membersOfPairs:
-            if Read_file_type[filename1] == 'illumina':
+            if Read_file_type[filename] == 'illumina':
                 if not args.illumina:
                     args.illumina = []
                 args.illumina.append(filename)
@@ -618,10 +618,21 @@ usage: canu [-version] [-citation] \
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", args.output_dir, "-p", args.canu_prefix, "gnuplotTested=true", "useGrid=false", "genomeSize=%s"%args.genome_size]
-    command.extend(["maxMemory", str(args.memory), "maxThreads", str(args.threads)])
-    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
-            "cns"):
-        command.extend([prefix+"Concurrency", "1"])
+    command.extend(["maxMemory=" + str(args.memory), "maxThreads=" + str(args.threads)])
+    """
+
+    The 'minMemory', 'maxMemory', 'minThreads' and 'maxThreads'
+    options will apply to all jobs, and can be used to artificially
+    limit canu to a portion of the current machine. In the overlapper
+    example above, setting maxThreads=4 would result in two concurrent
+    jobs instead of four.
+
+    https://canu.readthedocs.io/en/latest/parameter-reference.html
+    """
+
+#    for prefix in ("mhap", "mmap", "ovl", "ovb", "cor", "red", "oea", "bat",
+#            "cns"):
+#        command.append(prefix+"Concurrency=1")
     if args.pacbio:
         command.append("-pacbio-raw")
         command.extend(args.pacbio) #allow multiple files
@@ -682,14 +693,18 @@ def main():
     parser.add_argument('--no_quast', action = 'store_true', help='turn off runing quast for assembly quality statistics')
     parser.add_argument('--quast_exec', default='quast.py', help='path to quast.py (if not on path)')
     parser.add_argument('--run-details', help='JSON-format document describing details of the run', required=False)
+    parser.add_argument('--logfile', help='Log file', required=False)
     #parser.add_argument('--params', help="JSON file with additional information.")
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(2)
     args = parser.parse_args()
-    logfileName = os.path.basename(sys.argv[0])
-    logfileName = logfileName.replace(".py", "")
-    logfileName = os.path.join(args.output_dir, logfileName)+".log"
+    if args.logfile:
+        logfileName = os.path.abspath(args.logfile)
+    else:
+        logfileName = os.path.basename(sys.argv[0])
+        logfileName = logfileName.replace(".py", "")
+        logfileName = os.path.join(args.output_dir, logfileName)+".log"
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
     LOG = open(logfileName, 'w', 0) #unbuffered 
@@ -719,7 +734,8 @@ def main():
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
                         processedFileList.append(verifiedPair)
-                        processedFileList.append(unpaired)
+                        if os.stat(unpaired).st_size > 0:
+                            processedFileList.append(unpaired)
                 else:
                     if args.runTrimmomatic:
                         trimmedSingleReads = trimSingleReads(item, args, illumina=(fileList == args.illumina))
@@ -737,7 +753,7 @@ def main():
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     if args.run_details:
         fp = file(args.run_details, "w")
-        json.dump(details, fp, ident=2)
+        json.dump(details, fp, indent=2)
         fp.close()
 
 
