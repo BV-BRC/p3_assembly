@@ -572,7 +572,7 @@ def runSpades(args, details):
         command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
         command.extend(["--untrusted-contigs", args.untrusted_contigs])
-    if not args.no_careful:
+    if not args.no_careful and not args.meta:
         command.append("--careful")
     if args.memory:
         command.extend(["-m", str(args.memory)])
@@ -746,7 +746,11 @@ def main():
                     if args.runTrimmomatic:
                         (trimmedPair, trimmedUnpaired) = trimPairedReads(verifiedPair, args, illumina=(fileList == args.illumina))
                         processedFileList.append(trimmedPair)
-                        processedFileList.append(trimmedUnpaired)
+                        #
+                        # For metagenomics spades, we can't use the unpaired reads.
+                        #
+                        if not args.meta:
+                            processedFileList.append(trimmedUnpaired)
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
                         processedFileList.append(verifiedPair)
