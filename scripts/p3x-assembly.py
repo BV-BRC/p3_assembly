@@ -101,12 +101,13 @@ def trimPairedReads(readPair, args, illumina=False):
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     #copy unpaired reads to just one file
-    UnpairedRead1File = open(read1_out_base+"_U.fq", "a")
-    UnpairedRead2File = open(read2_out_base+"_U.fq")
-    for line in UnpairedRead2File:
-        UnpairedRead1File.write(line)
-    UnpairedRead1File.close()
-    UnpairedRead2File.close()
+    if os.path.exists(read2_out_base+"_U.fq"):
+        UnpairedRead1File = open(read1_out_base+"_U.fq", "a")
+        UnpairedRead2File = open(read2_out_base+"_U.fq")
+        for line in UnpairedRead2File:
+            UnpairedRead1File.write(line)
+        UnpairedRead1File.close()
+        UnpairedRead2File.close()
     # return value is tuple of two elements
     # first element is the two trimmed paired-read files joined by the separator found on input [: or %]
     # second element is the name of the file with unpaired reads (combining read1 and read2 to one file)
