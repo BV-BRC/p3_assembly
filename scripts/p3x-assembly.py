@@ -107,12 +107,13 @@ def trimPairedReads(readPair, args, illumina=False):
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     #copy unpaired reads to just one file
-    UnpairedRead1File = open(read1_out_base+"_U.fq", "a")
-    UnpairedRead2File = open(read2_out_base+"_U.fq")
-    for line in UnpairedRead2File:
-        UnpairedRead1File.write(line)
-    UnpairedRead1File.close()
-    UnpairedRead2File.close()
+    if os.path.exists(read2_out_base+"_U.fq"):
+        UnpairedRead1File = open(read1_out_base+"_U.fq", "a")
+        UnpairedRead2File = open(read2_out_base+"_U.fq")
+        for line in UnpairedRead2File:
+            UnpairedRead1File.write(line)
+        UnpairedRead1File.close()
+        UnpairedRead2File.close()
     # return value is tuple of two elements
     # first element is the two trimmed paired-read files joined by the separator found on input [: or %]
     # second element is the name of the file with unpaired reads (combining read1 and read2 to one file)
@@ -473,6 +474,7 @@ def writeSpadesYamlFile(args):
     
     LOG.write("illumina: "+", ".join(args.illumina)+"\n")
     LOG.write("iontorrent: "+", ".join(args.iontorrent)+"\n")
+    
     single_end_reads = []
     paired_end_reads = [[], []]
     mate_pair_reads = [[], []]
@@ -496,6 +498,18 @@ def writeSpadesYamlFile(args):
             mate_pair_reads[1].append(f)
         else:
             single_end_reads.append(os.path.abspath(item))
+
+
+    #
+    # Validate arguments for metagenomic spades. It can only run with
+    # a single paired-end library.
+    #
+
+    if args.meta:
+        if len(single_end_reads) > 0 or len(paired_end_reads[0]) > 1:
+            sys.stderr.write("SPAdes in metagenomics mode can only process a single paired-end read file\n")
+            sys.exit(1);
+
     precedingElement=False
     if len(single_end_reads):
         OUT.write("  {\n    type: \"single\",\n    single reads: [\n        \"")
@@ -565,10 +579,12 @@ def runSpades(args, details):
         command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
         command.extend(["--untrusted-contigs", args.untrusted_contigs])
-    if not args.no_careful:
+    if not args.no_careful and not args.meta:
         command.append("--careful")
     if args.memory:
         command.extend(["-m", str(args.memory)])
+    if args.meta:
+        command.append("--meta")
     LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
@@ -677,6 +693,7 @@ def main():
     illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%%" between mate-pairs', required=False, default=[])
     illumina_or_iontorrent.add_argument('--iontorrent', nargs='*', help='list of IonTorrent[.gz] files or pairs, ":" between paired-end-files', required=False, default=[])
     parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
+    parser.add_argument('--meta', action = 'store_true', help='run in metagenome mode', required=False)
     parser.add_argument('--pacbio', nargs='*', help='list of Pacific Biosciences fastq[.gz] or bam files', required=False)
     parser.add_argument('--sra', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False)
@@ -736,7 +753,11 @@ def main():
                     if args.runTrimmomatic:
                         (trimmedPair, trimmedUnpaired) = trimPairedReads(verifiedPair, args, illumina=(fileList == args.illumina))
                         processedFileList.append(trimmedPair)
-                        processedFileList.append(trimmedUnpaired)
+                        #
+                        # For metagenomics spades, we can't use the unpaired reads.
+                        #
+                        if not args.meta:
+                            processedFileList.append(trimmedUnpaired)
                         trimmedUnpaired = trimSingleReads(unpaired, args, illumina=(fileList == args.illumina))
                     else:
                         processedFileList.append(verifiedPair)
