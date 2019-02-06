@@ -190,9 +190,13 @@ def verifyReadPairing(readPair, output_dir):
             if not found:
                 idmod = re.sub("2$", "1", id)
                 found = idmod in read1
+                if found:
+                    id = idmod
             if not found:
                 idmod = re.sub("2:(\d+)$", "1:\1", id)
                 found = idmod in read1
+                if found:
+                    id = idmod
             if found:
                 PairedOut1.write(id+"\n"+read1[id])
                 PairedOut2.write(id+"\n")
