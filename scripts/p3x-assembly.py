@@ -483,21 +483,25 @@ def writeSpadesYamlFile(args):
         all_read_files = args.illumina
     elif args.iontorrent:
         all_read_files = args.iontorrent
+    print all_read_files
     for item in all_read_files:
         if ":" in item:
             pair = item.split(":")
-            f = os.path.abspath(pair[0])
-            paired_end_reads[0].append(f)
-            f = os.path.abspath(pair[1])
-            paired_end_reads[1].append(f)
+            if os.path.exists(pair[0]) and os.path.getsize(pair[0]) > 0:
+                f = os.path.abspath(pair[0])
+                paired_end_reads[0].append(f)
+                f = os.path.abspath(pair[1])
+                paired_end_reads[1].append(f)
         elif "%" in item:
             pair = item.split("%")
-            f = os.path.abspath(pair[0])
-            mate_pair_reads[0].append(f)
-            f = os.path.abspath(pair[1])
-            mate_pair_reads[1].append(f)
+            if os.path.exists(pair[0]) and os.path.getsize(pair[0]) > 0:
+                f = os.path.abspath(pair[0])
+                mate_pair_reads[0].append(f)
+                f = os.path.abspath(pair[1])
+                mate_pair_reads[1].append(f)
         else:
-            single_end_reads.append(os.path.abspath(item))
+            if os.path.exists(item) and os.path.getsize(item) > 0:
+                single_end_reads.append(os.path.abspath(item))
 
 
     #
