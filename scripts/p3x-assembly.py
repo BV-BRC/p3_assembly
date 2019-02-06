@@ -47,13 +47,19 @@ def determineReadFileType(read_id):
     """
     if read_id.startswith(">"):
         return "fasta"
+    # example illumina read id
     #@D00553R:173:HG53VBCXY:2:1101:1235:2074 1:N:0:ACAGTGAT
+    parts = read_id.split(":")
+    if len(parts) == 3:
+        return "iontorrent"
+    if len(parts) > 4:
+        return "illumina"
     if re.match(r"@[A-Z]\S+:\d+:\S+:\d+:\d+:\d+:\d+ \S+:\S+:\S+:\S+$", read_id):
         return "illumina" # newer illumina
     if re.match(r"@\S+:\S+:\S+:\S+:\S+#\S+/\S+$", read_id):
       
         return "illumina" # older illumina
-    if re.match(r"@\S+:\S+:\S+$", read_id):
+    if re.match(r"@[^:]+:[^:]+:[^:]+$", read_id):
         return "iontorrent" # 
     if re.match(r"@[SED]RR\d+\.\d+", read_id):
         return "sra" # 
