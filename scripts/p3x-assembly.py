@@ -187,6 +187,12 @@ def verifyReadPairing(readPair, output_dir):
         if i % 4 == 0:
             id = line.split()[0]
             found = id in read1
+            if not found:
+                idmod = re.sub("2$", "1", id)
+                found = idmod in read1
+            if not found:
+                idmod = re.sub("2:(\d+)$", "1:\1", id)
+                found = idmod in read1
             if found:
                 PairedOut1.write(id+"\n"+read1[id])
                 PairedOut2.write(id+"\n")
