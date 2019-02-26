@@ -98,11 +98,11 @@ def trimPairedReads(readPair, args, illumina=False):
 
     command = ["java", "-jar", os.path.join(Path_to_lib, 'trimmomatic.jar'), "PE", "-threads", str(args.threads)]
     command.extend([readFile1, readFile2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq"])
+    if illumina:
+        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
     command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
-    if illumina:
-        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
     LOG.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
@@ -129,11 +129,11 @@ def trimSingleReads(readFile, args, illumina=False):
 
     command = ["java", "-jar", os.path.join(Path_to_lib, 'trimmomatic.jar'), "SE", "-threads", str(args.threads)]
     command.extend([readFile, trimmedFileName])
+    if illumina:
+        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
     command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
-    if illumina:
-        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
     LOG.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
