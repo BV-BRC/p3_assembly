@@ -106,8 +106,12 @@ def trimPairedReads(readPair, args, illumina=False):
     LOG.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
-    #copy unpaired reads to just one file
-    if os.path.exists(read2_out_base+"_U.fq"):
+    #
+    # If we have unpaired reads, copy them to a single file.
+    # If we are running in metagenomics mode, discard the unpaired reads since
+    # metaSPADES only accepts a single PE library.
+    # 
+    if os.path.exists(read2_out_base+"_U.fq") and not args.meta:
         UnpairedRead1File = open(read1_out_base+"_U.fq", "a")
         UnpairedRead2File = open(read2_out_base+"_U.fq")
         for line in UnpairedRead2File:
