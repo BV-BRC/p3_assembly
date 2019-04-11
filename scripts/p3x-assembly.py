@@ -603,6 +603,8 @@ def runSpades(args, details):
         command.append("--iontorrent") # tell SPAdes that this is the read type
     yamlFile = writeSpadesYamlFile(args)
     command.extend(["--dataset", yamlFile])
+    if args.only_assembler:
+        command.append("--only-assembler")
     if args.trusted_contigs:
         command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
@@ -732,6 +734,7 @@ def main():
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
     parser.add_argument('--no_careful', action = 'store_true', help='turn off careful flag to SPAdes (faster)', required=False)
+    parser.add_argument("--only-assembler", action = 'store_true', help='turn off SPAdes error correction step', required=False)
     parser.add_argument('-t', '--threads', metavar='cpus', type=int, default=4)
     parser.add_argument('-m', '--memory', metavar='GB', type=int, help='RAM limit for SPAdes in Gb', default=250)
     parser.add_argument('--bytes_to_sample', metavar='bytes', type=int, default=Default_bytes_to_sample, help='how much to sample from read files to test file type')
