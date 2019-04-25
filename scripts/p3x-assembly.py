@@ -759,6 +759,8 @@ def main():
         logfileName = os.path.basename(sys.argv[0])
         logfileName = logfileName.replace(".py", "")
         logfileName = os.path.join(args.output_dir, logfileName)+".log"
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
     LOG = open(logfileName, 'w', 0) #unbuffered 
