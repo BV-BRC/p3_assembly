@@ -779,7 +779,8 @@ usage: canu [-version] [-citation] \
     #LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
 
     canuStartTime = time()
-    return_code = subprocess.call(command, shell=False)
+    canuLogFile = open(os.path.join(args.output_dir, "canu.log"), "w")
+    return_code = subprocess.call(command, shell=False, stderr=canuLogFile)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
@@ -793,10 +794,12 @@ usage: canu [-version] [-citation] \
                 })
     
     details['output_files'] = []
-    if os.path.exists(os.path.join(args.output_dir, "canu.report")):
-        canuReportFile = args.prefix+"canu_report.txt"
-        shutil.move(os.path.join(args.output_dir, args.prefix+".report"), os.path.join(args.output_dir, canuReportFile))
-        details['output_files'].append([canuReportFile, 'txt', 'Canu report'])
+    if os.path.exists(os.path.join(args.output_dir, "canu.log")):
+        details['output_files'].append(["canu.log", 'txt', 'Canu log'])
+        if os.path.exists(os.path.join(args.output_dir, "canu.report")):
+            canuReportFile = args.prefix+"canu_report.txt"
+            shutil.move(os.path.join(args.output_dir, "canu.report"), os.path.join(args.output_dir, canuReportFile))
+            details['output_files'].append([canuReportFile, 'txt', 'Canu report'])
 
     if os.path.exists(os.path.join(args.output_dir, "canu.contigs.fasta")):
         unitigsFile = args.prefix+"unitigs.fasta"
@@ -811,22 +814,21 @@ usage: canu [-version] [-citation] \
         details['output_files'].append([contigsFile, 'fasta', 'Canu contigs'])
         details['output_files'].append([unitigsGraphFile, 'gfa', 'Unitigs graph'])
         details['output_files'].append([contigsGraphFile, 'gfa', 'Contigs graph'])
-    
-    if not args.no_quast:
-        quastDir = os.path.join(args.output_dir, "quast_out")
-        quastCommand = [args.quast_exec,
-                        "-o", quastDir,
-                        "-t", str(args.threads),
-                        "--gene-finding",
-                        os.path.join(args.output_dir, unitigsFile),
-                        os.path.join(args.output_dir, contigsFile)]
-        LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-        return_code = subprocess.call(quastCommand, shell=False)
-        LOG.write("return code = %d\n"%return_code)
-        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
-        shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
-        details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
-        details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
+        if not args.no_quast:
+            quastDir = os.path.join(args.output_dir, "quast_out")
+            quastCommand = [args.quast_exec,
+                            "-o", quastDir,
+                            "-t", str(args.threads),
+                            "--gene-finding",
+                            os.path.join(args.output_dir, unitigsFile),
+                            os.path.join(args.output_dir, contigsFile)]
+            LOG.write("running quast: "+" ".join(quastCommand)+"\n")
+            return_code = subprocess.call(quastCommand, shell=False)
+            LOG.write("return code = %d\n"%return_code)
+            shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
+            shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
+            details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
+            details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
 
     LOG.write("Duration of canu run was %.1f hours\n"%(elapsedTime/3600.0))
 
@@ -945,7 +947,7 @@ def main():
         fp.close()
     if "output_files" not in details:
         details["output_files"] = []
-    details["output_files"].append(args.run_details, "json", "run_details")
+    details["output_files"].append([args.run_details, "json", "run_details"])
 
 
 if __name__ == "__main__":
