@@ -757,7 +757,7 @@ usage: canu [-version] [-citation] \
             [-pacbio-raw | -pacbio-corrected | -nanopore-raw | -nanopore-corrected] file1 file2 ...
 """
 # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
-    command = ["canu", "-d", args.output_dir, "-p", args.prefix, "useGrid=false", "genomeSize=%s"%args.genome_size]
+    command = ["canu", "-d", args.output_dir, "-p", "canu", "useGrid=false", "genomeSize=%s"%args.genome_size]
     command.extend(["maxMemory=" + str(args.memory), "maxThreads=" + str(args.threads)])
     """
     The 'minMemory', 'maxMemory', 'minThreads' and 'maxThreads'
@@ -791,18 +791,26 @@ usage: canu [-version] [-citation] \
                 'command_line': command,
                 'output_path': os.path.abspath(args.output_dir)
                 })
-    unitigsFile = args.prefix+"unitigs.fasta"
-    contigsFile = args.prefix+"contigs.fasta"
-    unitigsGraphFile = args.prefix+"unitigs.gfa"
-    contigsGraphFile = args.prefix+"contigs.gfa"
-    canuReportFile = args.prefix+"canu.report"
     
     details['output_files'] = []
-    details['output_files'].append([unitigsFile, 'fasta', 'Canu unitigs'])
-    details['output_files'].append([contigsFile, 'fasta', 'Canu contigs'])
-    details['output_files'].append([unitigsGraphFile, 'gfa', 'Unitigs graph'])
-    details['output_files'].append([contigsGraphFile, 'gfa', 'Contigs graph'])
-    details['output_files'].append([canuReportFile, 'txt', 'Canu report'])
+    if os.path.exists(os.path.join(args.output_dir, "canu.report")):
+        canuReportFile = args.prefix+"canu_report.txt"
+        shutil.move(os.path.join(args.output_dir, args.prefix+".report"), os.path.join(args.output_dir, canuReportFile))
+        details['output_files'].append([canuReportFile, 'txt', 'Canu report'])
+
+    if os.path.exists(os.path.join(args.output_dir, "canu.contigs.fasta")):
+        unitigsFile = args.prefix+"unitigs.fasta"
+        contigsFile = args.prefix+"contigs.fasta"
+        unitigsGraphFile = args.prefix+"unitigs.gfa"
+        contigsGraphFile = args.prefix+"contigs.gfa"
+        shutil.move(os.path.join(args.output_dir, "canu.unitigs.fasta"), os.path.join(args.output_dir, unitigsFile))
+        shutil.move(os.path.join(args.output_dir, "canu.contigs.fasta"), os.path.join(args.output_dir, contigsFile))
+        shutil.move(os.path.join(args.output_dir, "canu.unitigs.gfa"), os.path.join(args.output_dir, unitigsGraphFile))
+        shutil.move(os.path.join(args.output_dir, "canu.contigs.gfa"), os.path.join(args.output_dir, contigsGraphFile))
+        details['output_files'].append([unitigsFile, 'fasta', 'Canu unitigs'])
+        details['output_files'].append([contigsFile, 'fasta', 'Canu contigs'])
+        details['output_files'].append([unitigsGraphFile, 'gfa', 'Unitigs graph'])
+        details['output_files'].append([contigsGraphFile, 'gfa', 'Contigs graph'])
     
     if not args.no_quast:
         quastDir = os.path.join(args.output_dir, "quast_out")
