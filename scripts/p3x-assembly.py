@@ -642,7 +642,7 @@ def runUnicycler(args, details):
 
 
     shutil.move(os.path.join(args.output_dir, "assembly.fasta"), os.path.join(args.output_dir, assemblyFile))
-    shutil.move(os.path.join(args.output_dir, "assembly_graph.gfa"), os.path.join(args.output_dir, assemblyGraphFile))
+    shutil.move(os.path.join(args.output_dir, "assembly.gfa"), os.path.join(args.output_dir, assemblyGraphFile))
     shutil.move(os.path.join(args.output_dir, "unicycler.log"), os.path.join(args.output_dir, unicyclerLogFile))
 
     details['output_files'] = []
