@@ -592,7 +592,7 @@ def writeSpadesYamlFile(args):
 
 def runUnicycler(args, details):
     LOG.write("runUnicycler: elapsed seconds = %f\n"%(time()-Start_time))
-    command = ["unicycler", "-t", str(args.threads), "-o", args.output_dir]
+    command = ["unicycler", "-t", str(args.threads), "-o", args.output_dir, "--pilon_path", args.pilon_path]
     if args.min_contig_length:
         command.extend(("--min_fasta_length", str(args.min_contig_length)))
     command.extend(("--keep", "0")) # keep only assembly.gfa, assembly.fasta and unicycler.log
@@ -870,6 +870,7 @@ def main():
     parser.add_argument('--trimmomaticEndQual', metavar="phred", type=int, default=Default_end_quality, help='score at which individual 3\' bases are trimmed')
     parser.add_argument('--no_quast', action = 'store_true', help='turn off runing quast for assembly quality statistics')
     parser.add_argument('--quast_exec', default='quast.py', help='path to quast.py (if not on path)')
+    parser.add_argument('--pilon_path', default='pilon', help='path to pilon executable or jar')
     parser.add_argument('--run-details', help='JSON-format document describing details of the run', required=False)
     parser.add_argument('--logfile', help='Log file', required=False)
     parser.add_argument('--params_json', help="JSON file with additional information.")
