@@ -30,6 +30,7 @@ Default_bytes_to_sample = 20000
 Default_window_width = 4
 Default_window_quality = 15
 Default_end_quality = 10
+Max_short_read_length = 600
 Read_id_sample = {}
 Read_file_type = {}
 Avg_read_length = {}
@@ -37,7 +38,7 @@ LOG = None # create a log file at start of main()
 Start_time = None
 Path_to_lib = '.'
 
-def determineReadFileType(read_id):
+def determineReadFileType(read_id, avgReadLength):
     """ 
     Analyze sample of text from read file and return one of:
     illumina, iontorrent, pacbio, nanopore, ...
@@ -46,22 +47,22 @@ def determineReadFileType(read_id):
     """
     if read_id.startswith(">"):
         return "fasta"
-    # example illumina read id
-    #@D00553R:173:HG53VBCXY:2:1101:1235:2074 1:N:0:ACAGTGAT
-    parts = read_id.split(":")
-    if len(parts) == 3:
-        return "iontorrent"
-    if len(parts) > 4:
-        return "illumina"
-    if re.match(r"@[A-Z]\S+:\d+:\S+:\d+:\d+:\d+:\d+ \S+:\S+:\S+:\S+$", read_id):
-        return "illumina" # newer illumina
-    if re.match(r"@\S+:\S+:\S+:\S+:\S+#\S+/\S+$", read_id):
-      
-        return "illumina" # older illumina
-    if re.match(r"@[^:]+:[^:]+:[^:]+$", read_id):
-        return "iontorrent" # 
-    if re.match(r"@[SED]RR\d+\.\d+", read_id):
-        return "sra" # 
+    if avgReadLength < Max_short_read_length:
+        # example illumina read id
+        #@D00553R:173:HG53VBCXY:2:1101:1235:2074 1:N:0:ACAGTGAT
+        parts = read_id.split(":")
+        if len(parts) == 3:
+            return "iontorrent"
+        if len(parts) > 4:
+            return "illumina"
+        if re.match(r"@[A-Z]\S+:\d+:\S+:\d+:\d+:\d+:\d+ \S+:\S+:\S+:\S+$", read_id):
+            return "illumina" # newer illumina
+        if re.match(r"@\S+:\S+:\S+:\S+:\S+#\S+/\S+$", read_id):
+            return "illumina" # older illumina
+        if re.match(r"@[^:]+:[^:]+:[^:]+$", read_id):
+            return "iontorrent" # 
+        if re.match(r"@[SED]RR\d+\.\d+", read_id):
+            return "sra" # 
 # NOTE: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
     if re.match(r"@\S+/\S+/\S+_\S+$", read_id): #@<MovieName> /<ZMW_number>/<subread-start>_<subread-end> :this is CCS Subread
         return "pacbio_ccs_subread" # 
@@ -231,7 +232,7 @@ def verifyReadPairing(readPair, output_dir):
     # separator is ':' or '%' from input
     return (verifiedPairedFile1+separator+verifiedPairedFile2, unpairedReadFile)
 
-def studyReadFile(filename):
+def studyReadFile(filename, details=None):
     LOG.write("studyReadFile(%s): elapsed seconds = %f\n"%(filename, time()-Start_time))
     #return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
     # figures out Read_file_type, collects a sample of read IDs, and average read length
@@ -248,7 +249,6 @@ def studyReadFile(filename):
     lines = text.split("\n")
     if len(lines) < 2:
         raise Exception("text sample (length %d) lacks at least 2 lines"%len(text))
-    Read_file_type[filename] = determineReadFileType(lines[0])
     read_format = None
     if lines[0].startswith("@"):
         read_format = 'fastq'
@@ -273,7 +273,15 @@ def studyReadFile(filename):
             else:
                 read += line.rstrip()
     Avg_read_length[filename] = sum(readLengths)/float(len(readLengths))
+    Read_file_type[filename] = determineReadFileType(lines[0], Avg_read_length[filename])
     LOG.write("found read type %s average read length %.1f\n"%(Read_file_type[filename], Avg_read_length[filename]))
+    if details:
+        if not "inferred_read_type" in details:
+            details["inferred_read_type"] = {}
+        details["inferred_read_type"][filename] = Read_file_type[filename]
+        if not "estimated_read_length" in details:
+            details["estimated_read_length"] = {}
+        details["estimated_read_length"][filename] = Avg_read_length[filename]
     return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
 
 def findSingleDifference(s1, s2):
@@ -288,11 +296,11 @@ def findSingleDifference(s1, s2):
             retval = (c1, c2)
     return retval
 
-def categorize_anonymous_read_files(args):
+def categorize_anonymous_read_files(args, details):
     LOG.write("categorize_anonymous_read_files: elapsed seconds = %f\n"%(time()-Start_time))
     LOG.write("  files=%s\n"%("\t".join(args.anonymous_reads)))
     for filename in args.anonymous_reads:
-        studyReadFile(filename)
+        studyReadFile(filename, details)
 
     # try to find paired files
     membersOfPairs = set()
@@ -322,7 +330,7 @@ def categorize_anonymous_read_files(args):
                             args.iontorrent.append(":".join(pairedFiles))
                             LOG.write("appending to args.iontorrent: %s %s\n"%pairedFiles)
                         else: # neither illumina vs iontorrent, perhaps 'sra'
-                            if Avg_read_length[filename1] < 500:
+                            if Avg_read_length[filename1] < Max_short_read_length:
                                 #call it illumina
                                 if not args.illumina:
                                     args.illumina=[]
@@ -355,7 +363,7 @@ def categorize_anonymous_read_files(args):
                     args.nanopore = []
                 args.nanopore.append(filename)
                 LOG.write("appending to args.nanopore: %s\n"%filename)
-            elif Avg_read_length[filename] < 500:
+            elif Avg_read_length[filename] < Max_short_read_length:
                 #call it illumina
                 if not args.illumina:
                     args.illumina=[]
@@ -465,9 +473,9 @@ def study_all_read_files(args, details):
         else:
             LOG.write("\tno single char difference found\n")
         if pair[0] not in Read_file_type:
-            studyReadFile(pair[0])
+            studyReadFile(pair[0], details)
         if pair[1] not in Read_file_type:
-            studyReadFile(pair[1])
+            studyReadFile(pair[1], details)
         if Read_file_type[pair[0]] == Read_file_type[pair[1]]:
             LOG.write("\tinspected file types congruent: %s\n"%Read_file_type[pair[0]])
             if Read_file_type[pair[0]] != fileItemType[item]:
@@ -482,7 +490,7 @@ def study_all_read_files(args, details):
         LOG.write("\tread IDs tested for match for files %s "%str(pair)+" result = %s\n"%str(allPairsMatch))
 
     for filename in singleFiles:
-        studyReadFile(filename)
+        studyReadFile(filename, details)
         if Read_file_type[filename] != fileItemType[filename]:
             LOG.write("\t!discrepancy with claimed type: %s is type %s\n"%(filename, Read_file_type[filename]))
     return
@@ -590,6 +598,26 @@ def writeSpadesYamlFile(args):
     OUT.close()
     return(outfileName)    
 
+def filterContigsByMinLength(inputFile, outputFile, min_length = 0):
+    """ Write only sequences at or above min_length to output file."""
+    LOG.write("filterContigsByMinLength(%s, %s, %d) elapsed seconds = %f\n"%(inputFile, outputFile, min_length, time()-Start_time))
+    with open(inputFile) as IN:
+        with open(outputFile, 'w') as OUT:
+            seqId=None
+            seq = ""
+            for line in IN:
+                if line.startswith(">"):
+                    if seqId and len(seq) >= min_length:
+                        OUT.write(">%s\n%s\n"%(seqId, seq))
+                        seqId = None
+                        seq = ""
+                    m = re.match(">(\S+)", line)
+                    seqId = m.group(1)
+                else:
+                    seq += line.rstrip()
+            if seqId and len(seq) >= min_length:
+                OUT.write(">%s\n%s\n"%(seqId, seq))
+
 def runUnicycler(args, details):
     LOG.write("runUnicycler: elapsed seconds = %f\n"%(time()-Start_time))
     command = ["unicycler", "-t", str(args.threads), "-o", args.output_dir]
@@ -635,35 +663,35 @@ def runUnicycler(args, details):
                 'command_line': command,
                 'output_path': os.path.abspath(args.output_dir)
                 })
+    LOG.write("Duration of Unicycler run was %.1f hours\n"%(elapsedTime/3600.0))
+    unicyclerLogFile = args.prefix+"unicycler.log"
+    shutil.move(os.path.join(args.output_dir, "unicycler.log"), os.path.join(args.output_dir, unicyclerLogFile))
+    details['output_files'] = []
+    details['output_files'].append([unicyclerLogFile, 'txt', 'Unicycler logfile'])
 
     assemblyFile = args.prefix+"assembly.fasta"
     assemblyGraphFile = args.prefix+"assembly_graph.gfa"
-    unicyclerLogFile = args.prefix+"unicycler.log"
-
-
-    shutil.move(os.path.join(args.output_dir, "assembly.fasta"), os.path.join(args.output_dir, assemblyFile))
+    filterContigsByMinLength(os.path.join(args.output_dir, "assembly.fasta"), os.path.join(args.output_dir, assemblyFile), args.min_contig_length)
     shutil.move(os.path.join(args.output_dir, "assembly.gfa"), os.path.join(args.output_dir, assemblyGraphFile))
-    shutil.move(os.path.join(args.output_dir, "unicycler.log"), os.path.join(args.output_dir, unicyclerLogFile))
-
-    details['output_files'] = []
     details['output_files'].append([assemblyFile, 'fasta', 'Genome assembly'])
     details['output_files'].append([assemblyGraphFile, 'gfa', 'Assembly graph'])
-    details['output_files'].append([unicyclerLogFile, 'txt', 'Unicycler logfile'])
     
-    LOG.write("Duration of Unicycler run was %.1f hours\n"%(elapsedTime/3600.0))
     if not args.no_quast:
         quastDir = os.path.join(args.output_dir, "quast_out")
         quastCommand = [args.quast_exec,
                         "-o", quastDir,
                         "-t", str(args.threads),
+                        "--min-contig", str(args.min_contig_length),
                         "--gene-finding",
                         os.path.join(args.output_dir, assemblyFile)]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
         shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
         details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
+        details['output_files'].append([args.prefix+"quast_report.txt", 'txt', 'Quast report'])
         details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
 
     LOG.write("Duration of Unicycler run was %f hours\n"%(elapsedTime/3600.0))
@@ -715,22 +743,27 @@ def runSpades(args, details):
     assemblyGraphFile = args.prefix+"assembly_graph.gfa"
     spadesLogFile = args.prefix+"spades.log"
     
-    shutil.move(os.path.join(args.output_dir, "scaffolds.fasta"), os.path.join(args.output_dir, scaffoldsFile))
-    shutil.move(os.path.join(args.output_dir, "contigs.fasta"), os.path.join(args.output_dir, contigsFile))
-    shutil.move(os.path.join(args.output_dir, "assembly_graph_with_scaffolds.gfa"), os.path.join(args.output_dir, assemblyGraphFile))
     shutil.move(os.path.join(args.output_dir, "spades.log"), os.path.join(args.output_dir, spadesLogFile))
-
     details['output_files'] = []
+    details['output_files'].append([spadesLogFile, 'txt', 'Spades logfile'])
+    
+    if not os.path.exists(os.path.join(args.output_dir, "contigs.fasta")):
+        LOG.write("Duration of SPAdes run was %.1f hours\n"%(elapsedTime/3600.0))
+        LOG.write("spades failed to generate contigs.fasta")
+        return
+    filterContigsByMinLength(os.path.join(args.output_dir, "contigs.fasta"), os.path.join(args.output_dir, contigsFile), args.min_contig_length)
+    filterContigsByMinLength(os.path.join(args.output_dir, "scaffolds.fasta"), os.path.join(args.output_dir, scaffoldsFile), args.min_contig_length)
+    shutil.move(os.path.join(args.output_dir, "assembly_graph_with_scaffolds.gfa"), os.path.join(args.output_dir, assemblyGraphFile))
     details['output_files'].append([scaffoldsFile, 'fasta', 'Generated scaffolds'])
     details['output_files'].append([contigsFile, 'fasta', 'Generated contigs'])
     details['output_files'].append([assemblyGraphFile, 'gfa', 'Assembly graph'])
-    details['output_files'].append([spadesLogFile, 'txt', 'Spades logfile'])
     
     if not args.no_quast:
         quastDir = os.path.join(args.output_dir, "quast_out")
         quastCommand = [args.quast_exec,
                         "-o", quastDir,
                         "-t", str(args.threads),
+                        "--min-contig", str(args.min_contig_length),
                         "--gene-finding",
                         os.path.join(args.output_dir, scaffoldsFile),
                         os.path.join(args.output_dir, contigsFile)]
@@ -738,11 +771,14 @@ def runSpades(args, details):
         return_code = subprocess.call(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
         shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
         details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
+        details['output_files'].append([args.prefix+"quast_report.txt", 'txt', 'Quast report'])
         details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
 
     LOG.write("Duration of SPAdes run was %.1f hours\n"%(elapsedTime/3600.0))
+    return
 
 def runCanu(args, details):
     LOG.write("runCanu: elapsed seconds = %f\n"%(time()-Start_time))
@@ -801,34 +837,40 @@ usage: canu [-version] [-citation] \
             shutil.move(os.path.join(args.output_dir, "canu.report"), os.path.join(args.output_dir, canuReportFile))
             details['output_files'].append([canuReportFile, 'txt', 'Canu report'])
 
-    if os.path.exists(os.path.join(args.output_dir, "canu.contigs.fasta")):
-        unitigsFile = args.prefix+"unitigs.fasta"
-        contigsFile = args.prefix+"contigs.fasta"
-        unitigsGraphFile = args.prefix+"unitigs.gfa"
-        contigsGraphFile = args.prefix+"contigs.gfa"
-        shutil.move(os.path.join(args.output_dir, "canu.unitigs.fasta"), os.path.join(args.output_dir, unitigsFile))
-        shutil.move(os.path.join(args.output_dir, "canu.contigs.fasta"), os.path.join(args.output_dir, contigsFile))
-        shutil.move(os.path.join(args.output_dir, "canu.unitigs.gfa"), os.path.join(args.output_dir, unitigsGraphFile))
-        shutil.move(os.path.join(args.output_dir, "canu.contigs.gfa"), os.path.join(args.output_dir, contigsGraphFile))
-        details['output_files'].append([unitigsFile, 'fasta', 'Canu unitigs'])
-        details['output_files'].append([contigsFile, 'fasta', 'Canu contigs'])
-        details['output_files'].append([unitigsGraphFile, 'gfa', 'Unitigs graph'])
-        details['output_files'].append([contigsGraphFile, 'gfa', 'Contigs graph'])
-        if not args.no_quast:
-            quastDir = os.path.join(args.output_dir, "quast_out")
-            quastCommand = [args.quast_exec,
-                            "-o", quastDir,
-                            "-t", str(args.threads),
-                            "--gene-finding",
-                            os.path.join(args.output_dir, unitigsFile),
-                            os.path.join(args.output_dir, contigsFile)]
-            LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-            return_code = subprocess.call(quastCommand, shell=False)
-            LOG.write("return code = %d\n"%return_code)
-            shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
-            shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
-            details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
-            details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
+    if not os.path.exists(os.path.join(args.output_dir, "canu.contigs.fasta")):
+        LOG.write("Duration of canu run was %.1f hours\n"%(elapsedTime/3600.0))
+        LOG.write("canu failed to generate contigs.fasta\n")
+        return
+    unitigsFile = args.prefix+"unitigs.fasta"
+    contigsFile = args.prefix+"contigs.fasta"
+    unitigsGraphFile = args.prefix+"unitigs.gfa"
+    contigsGraphFile = args.prefix+"contigs.gfa"
+    filterContigsByMinLength(os.path.join(args.output_dir, "canu.contigs.fasta"), os.path.join(args.output_dir, contigsFile), args.min_contig_length)
+    filterContigsByMinLength(os.path.join(args.output_dir, "canu.unitigs.fasta"), os.path.join(args.output_dir, unitigsFile), args.min_contig_length)
+    shutil.move(os.path.join(args.output_dir, "canu.unitigs.gfa"), os.path.join(args.output_dir, unitigsGraphFile))
+    shutil.move(os.path.join(args.output_dir, "canu.contigs.gfa"), os.path.join(args.output_dir, contigsGraphFile))
+    details['output_files'].append([unitigsFile, 'fasta', 'Canu unitigs'])
+    details['output_files'].append([contigsFile, 'fasta', 'Canu contigs'])
+    details['output_files'].append([unitigsGraphFile, 'gfa', 'Unitigs graph'])
+    details['output_files'].append([contigsGraphFile, 'gfa', 'Contigs graph'])
+    if not args.no_quast:
+        quastDir = os.path.join(args.output_dir, "quast_out")
+        quastCommand = [args.quast_exec,
+                        "-o", quastDir,
+                        "-t", str(args.threads),
+                        "--min-contig", str(args.min_contig_length),
+                        "--gene-finding",
+                        os.path.join(args.output_dir, unitigsFile),
+                        os.path.join(args.output_dir, contigsFile)]
+        LOG.write("running quast: "+" ".join(quastCommand)+"\n")
+        return_code = subprocess.call(quastCommand, shell=False)
+        LOG.write("return code = %d\n"%return_code)
+        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
+        shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(args.output_dir, "icarus_viewers"))
+        details['output_files'].append([args.prefix+"quast_report.html", 'html', 'Quast report'])
+        details['output_files'].append([args.prefix+"quast_report.txt", 'txt', 'Quast report'])
+        details['output_files'].append([args.prefix+"icarus_viewers", 'dir', 'Quast icarus viewers'])
 
     LOG.write("Duration of canu run was %.1f hours\n"%(elapsedTime/3600.0))
 
@@ -850,8 +892,8 @@ def main():
     parser.add_argument('--sra', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False)
     parser.add_argument('--prefix', help='prefix for output files', required=False)
-    parser.add_argument('--genome_size', default=Default_genome_size, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=1000, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--genome_size', default=Default_genome_size, help='expected genome size for canu, e.g. 300k, 5m or 1.1g', required=False)
+    parser.add_argument('--min_contig_length', default=200, help='save contigs of this length or longer', required=False)
     #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--anonymous_reads', nargs='*', help="unspecified read files, types automatically inferred.")
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
@@ -897,7 +939,7 @@ def main():
 
     details = { 'logfile' : logfileName }
     if args.anonymous_reads:
-        categorize_anonymous_read_files(args)
+        categorize_anonymous_read_files(args, details)
 # if any illumina or iontorrent reads present, use Unicycler (long-reads can be present), else use canu for long-reads
     if args.sra:
         fetch_sra_files(args, details)
@@ -942,12 +984,13 @@ def main():
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     if args.run_details:
+        LOG.write("writing details in json format to %s\n"%args.run_details)
+        if "output_files" not in details:
+            details["output_files"] = []
+        details["output_files"].append([args.run_details, "json", "run_details"])
         fp = file(os.path.join(args.output_dir, args.run_details), "w")
         json.dump(details, fp, indent=2)
         fp.close()
-    if "output_files" not in details:
-        details["output_files"] = []
-    details["output_files"].append([args.run_details, "json", "run_details"])
 
 
 if __name__ == "__main__":
