@@ -38,6 +38,54 @@ LOG = None # create a log file at start of main()
 Start_time = None
 Path_to_lib = '.'
 
+def parseJasonParameters(args):
+    if not os.path.exists(args.params_json):
+        raise Exception("cannot find json parameters file %s\n"%args.params_json)
+    with open(args.params_json) as json_file:
+        data = json.load(json_file)
+        args.output_dir = data['output_file']
+        args.min_contig_length = data['min_contig_length']
+        if "paired_end_libs" in data:
+            for pe in data["paired_end_libs"]:
+                if pe["platform"] == 'illumina':
+                    if not args.illumina:
+                        args.illumina = []
+                    args.illumina.append(":".join((data["read1"], data["read2"]))) 
+                elif pe["platform"] == 'iontorrent':
+                    if not args.iontorrent:
+                        args.iontorrent = []
+                    args.iontorrent.append(":".join((data["read1"], data["read2"]))) 
+                else:
+                    if not args.anonymous_reads:
+                        args.anonymous_reads = []
+                    args.anonymous_reads.append(":".join((data["read1"], data["read2"]))) 
+        if "single_end_libs" in data:
+            for pe in data["single_end_libs"]:
+                if pe["platform"] == 'illumina':
+                    if not args.illumina:
+                        args.illumina = []
+                    args.illumina.append(data["read"]) 
+                elif pe["platform"] == 'iontorrent':
+                    if not args.iontorrent:
+                        args.iontorrent = []
+                    args.iontorrent.append(data["read"]) 
+                elif pe["platform"] == 'pacbio':
+                    if not args.pacbio:
+                        args.pacbio = []
+                    args.pacbio.append(data["read"]) 
+                elif pe["platform"] == 'nanopore':
+                    if not args.nanopore:
+                        args.nanopore = []
+                    args.nanopore.append(data["read"]) 
+                else:
+                    if not args.anonymous_reads:
+                        args.anonymous_reads = []
+                    args.anonymous_reads.append(":".join((data["read1"], data["read2"]))) 
+        if "srr_ids" in data:
+            if not args.sra:
+                args.sra=[]
+                args.sra.extend(data["srr_ids"])
+
 def determineReadFileType(read_id, avgReadLength):
     """ 
     Analyze sample of text from read file and return one of:
@@ -920,6 +968,8 @@ def main():
         parser.print_help()
         sys.exit(2)
     args = parser.parse_args()
+    if args.params_json:
+        parseJsonParameters(args)
     args.prefix = os.path.basename(args.output_dir)
     args.prefix = args.prefix.rstrip("_")+"_"
     if args.logfile:
