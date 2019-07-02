@@ -942,7 +942,7 @@ def main():
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False)
     parser.add_argument('--prefix', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', default=Default_genome_size, help='expected genome size for canu, e.g. 300k, 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=200, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_length', default=200, type=int, help='save contigs of this length or longer', required=False)
     #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--anonymous_reads', nargs='*', help="unspecified read files, types automatically inferred.")
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
