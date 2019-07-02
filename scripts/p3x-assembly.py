@@ -152,7 +152,8 @@ def trimPairedReads(readPair, args, illumina=False):
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
     LOG.write("command = "+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False)
+    
+    return_code = runProcess(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     #
     # If we have unpaired reads, copy them to a single file.
@@ -187,7 +188,7 @@ def trimSingleReads(readFile, args, illumina=False):
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
     LOG.write("command = "+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False)
+    return_code = runProcess(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     return trimmedFileName
 
@@ -469,13 +470,13 @@ def fetch_sra_files(args, details):
 
         if runinfo['LibraryLayout'].startswith("SINGLE"):
             sra_tools.fastqDumpExistingSraFile(os.path.join(sra_dir, sra+".sra"), splitFiles=False)
-            #subprocess.call(["fastq-dump", sra+".sra"], shell=False)
+            #runProcess(["fastq-dump", sra+".sra"], shell=False)
             if not os.path.exists(sra+".fastq"):
                 raise Exception("Problem: file %s.fastq does not exist after running fastq-dump on %s.sra\n"%(sra, sra))
             listToAddTo.append(sra+".fastq")
         elif runinfo['LibraryLayout'].startswith("PAIRED"):
             sra_tools.fastqDumpExistingSraFile(os.path.join(sra_dir, sra+".sra"), splitFiles=True)
-            #subprocess.call(["fastq-dump", "--split-files", sra+".sra"], shell=False)
+            #runProcess(["fastq-dump", "--split-files", sra+".sra"], shell=False)
             if not (os.path.exists(sra+"_1.fastq") and os.path.exists(sra+"_2.fastq")):
                 raise Exception("Problem: file %s_1.fastq and/or %s_2.fastq do not exist after running fastq-dump --split-files on %s.sra\n"%(sra, sra, sra))
             listToAddTo.append(sra + "_1.fastq:" + sra +"_2.fastq")
@@ -698,7 +699,7 @@ def runUnicycler(args, details):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     unicyclerStartTime = time()
 
-    return_code = subprocess.call(command, shell=False)
+    return_code = runProcess(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
 
     unicyclerEndTime = time()
@@ -733,7 +734,7 @@ def runUnicycler(args, details):
                         "--gene-finding",
                         os.path.join(args.output_dir, assemblyFile)]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-        return_code = subprocess.call(quastCommand, shell=False)
+        return_code = runProcess(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
         shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
@@ -773,7 +774,7 @@ def runSpades(args, details):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
 
-    return_code = subprocess.call(command, shell=False)
+    return_code = runProcess(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
 
     spadesEndTime = time()
@@ -816,7 +817,7 @@ def runSpades(args, details):
                         os.path.join(args.output_dir, scaffoldsFile),
                         os.path.join(args.output_dir, contigsFile)]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-        return_code = subprocess.call(quastCommand, shell=False)
+        return_code = runProcess(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
         shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
@@ -864,7 +865,7 @@ usage: canu [-version] [-citation] \
 
     canuStartTime = time()
     canuLogFile = open(os.path.join(args.output_dir, "canu.log"), "w")
-    return_code = subprocess.call(command, shell=False, stderr=canuLogFile)
+    return_code = runProcess(command, shell=False, stderr=canuLogFile)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
@@ -911,7 +912,7 @@ usage: canu [-version] [-citation] \
                         os.path.join(args.output_dir, unitigsFile),
                         os.path.join(args.output_dir, contigsFile)]
         LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-        return_code = subprocess.call(quastCommand, shell=False)
+        return_code = runProcess(quastCommand, shell=False)
         LOG.write("return code = %d\n"%return_code)
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(args.output_dir, args.prefix+"quast_report.html"))
         shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(args.output_dir, args.prefix+"quast_report.txt"))
@@ -941,7 +942,7 @@ def main():
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False)
     parser.add_argument('--prefix', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', default=Default_genome_size, help='expected genome size for canu, e.g. 300k, 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=200, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_length', default=200, type=int, help='save contigs of this length or longer', required=False)
     #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--anonymous_reads', nargs='*', help="unspecified read files, types automatically inferred.")
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
@@ -964,6 +965,7 @@ def main():
     parser.add_argument('--run-details', help='JSON-format document describing details of the run', required=False)
     parser.add_argument('--logfile', help='Log file', required=False)
     parser.add_argument('--params_json', help="JSON file with additional information.")
+    parser.add_argument('--path', help="Add the given directories to the PATH", nargs='*', required=False)
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(2)
@@ -987,6 +989,9 @@ def main():
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(Start_time))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
+
+    if args.path:
+        os.environ["PATH"] = ":".join(args.path) + ":" + os.environ["PATH"]
 
     details = { 'logfile' : logfileName }
     if args.anonymous_reads:
@@ -1043,6 +1048,19 @@ def main():
         json.dump(details, fp, indent=2)
         fp.close()
 
+def fatalError(msg):
+    LOG.write("Fatal error: %s\n" % msg)
+    sys.stderr.write("Fatal error: %s\n" % msg)
+    sys.exit(1)
+
+def runProcess(cmd, **opts):
+    try:
+        rc = subprocess.call(cmd, **opts)
+        return rc
+    except OSError as e:
+        fatalError("Error running %s: %s" % (cmd, e))
+    except Exception as e:
+        fatalError("Error running %s: %s" % (cmd, e))
 
 if __name__ == "__main__":
     main()
