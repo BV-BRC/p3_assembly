@@ -773,7 +773,7 @@ def filterContigsByMinLength(inputFile, outputFile, args, shortReadDepth=None, l
                         if longReadDepth and seqId in longReadDepth:
                             meanDepth, length, normalizedDepth = longReadDepth[seqId]
                             contigId += " lcov %.01f ldepth %.2f"%(meanDepth, normalizedDepth)
-                        if args.contigCircular and seqId in args.contigCicular:
+                        if args.contigCircular and seqId in args.contigCircular:
                             contigId += " circular=true"
                         OUT.write(contigId+"\n")
                         for i in range(0, len(seq), 60):
@@ -1239,6 +1239,18 @@ usage: canu [-version] [-citation] \
     shutil.move(os.path.join(WorkDir, "canu.contigs.fasta"), os.path.join(WorkDir, "contigs.fasta"))
     return os.path.join(WorkDir, "contigs.fasta")
 
+def write_html_report():
+    htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
+    HTML = open(htmlFile, 'w')
+    HTML.write("<h1>Genome Assembly Report</h1>\n")
+
+    HTML.write("Input reads:<br>\n")
+    HTML.write("<table><tr><th>File</th><th>Platform</th><th>Layout</th<th>Avg Len</th><th>Reads</th></tr>\n")
+    for item in args.illumina:
+        layout = "single"
+        if ":" in item:
+            layout = "paired"
+        HTML.write("<tr><td>"+item+"</td><td>Illumina</td><td>"+layout+"</td>")
 
 def main():
     global Start_time
@@ -1309,10 +1321,11 @@ def main():
     LOG.write("args= "+str(args)+"\n\n")
     LOG.write("Temporary directory is "+WorkDir+"\n\n")
     LOG.write("Final output will be saved to "+SaveDir+"\n\n")
-
     details = { 'logfile' : logfileName }
+
     if args.anonymous_reads:
         categorize_anonymous_read_files(args, details)
+
     if args.sra:
         fetch_sra_files(args, details)
     organize_read_files(args, details)
