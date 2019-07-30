@@ -37,7 +37,6 @@ Read_file_type = {}
 Avg_read_length = {}
 LOG = None # create a log file at start of main()
 Start_time = None
-Path_to_lib = '.'
 WorkDir = None
 SaveDir = None
 
@@ -127,7 +126,7 @@ def determineReadType(read_id, avgReadLength):
         return "nanopore" # 
     return "na"
 
-def trimGalore(args):
+def trimGalore(args, details):
     startTrimTime = time()
     LOG.write("trimGalore() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     for technologyReads in (args.illumina, args.iontorrent):
@@ -194,10 +193,10 @@ def trimPairedReads(readPair, args, illumina=False):
     read1_out_base = os.path.join(WorkDir, read1_out_base)
     read2_out_base = os.path.join(WorkDir, read2_out_base)
 
-    command = ["java", "-jar", os.path.join(Path_to_lib, 'trimmomatic.jar'), "PE", "-threads", str(args.threads)]
+    command = ["java", "-jar", args.trimmomatic_jar, "PE", "-threads", str(args.threads)]
     command.extend([readFile1, readFile2, read1_out_base+"_P.fq", read1_out_base+"_U.fq", read2_out_base+"_P.fq", read2_out_base+"_U.fq"])
-    if illumina:
-        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
+    #if illumina:
+    #    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters))
     command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
@@ -229,10 +228,10 @@ def trimSingleReads(readFile, args, illumina=False):
     trimmedFileName += "_trim.fq"
     trimmedFileName = os.path.join(WorkDir, trimmedFileName)
 
-    command = ["java", "-jar", os.path.join(Path_to_lib, 'trimmomatic.jar'), "SE", "-threads", str(args.threads)]
+    command = ["java", "-jar", args.trimmomatic_jar, "SE", "-threads", str(args.threads)]
     command.extend([readFile, trimmedFileName])
-    if illumina:
-        command.append("ILLUMINACLIP:%s:2:30:10"%os.path.join(Path_to_lib, 'illumina_adapters.fa'))
+    #if illumina:
+    #    command.append("ILLUMINACLIP:%s:2:30:10"%args.illuminaAdapters))
     command.append("SLIDINGWINDOW:%d:%d"%(args.trimmomaticWindow, args.trimmomaticMinQual))
     command.append("LEADING:%d"%(args.trimmomaticEndQual))
     command.append("TRAILING:%d"%(args.trimmomaticEndQual))
@@ -333,7 +332,8 @@ def verifyReadPairing(readPair, output_dir):
     return (verifiedPairedFile1+separator+verifiedPairedFile2, unpairedReadFile)
 
 def studyReadFile(filename, details=None):
-    LOG.write("studyReadFile() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
+    srf_time = time()
+    LOG.write("studyReadFile() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(srf_time)), srf_time-Start_time))
     #return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
     # figures out Read_file_type, collects a sample of read IDs, and average read length
     Read_file_type[filename] = 'na'
@@ -342,6 +342,7 @@ def studyReadFile(filename, details=None):
         F = gzip.open(filename)
     else:
         F = open(filename)
+
     text = F.read(Default_bytes_to_sample) #read X number of bytes for text sample
     F.close()
     LOG.write("  file text sample %s:\n%s\n\n"%(filename, text[0:50]))
@@ -382,6 +383,7 @@ def studyReadFile(filename, details=None):
         if not "estimated_read_length" in details:
             details["estimated_read_length"] = {}
         details["estimated_read_length"][filename] = Avg_read_length[filename]
+    LOG.write("duration of studyReadFile was %d seconds\n"%(time() - srf_time))
     return(Read_file_type[filename], Read_id_sample[filename], Avg_read_length[filename])
 
 def findSingleDifference(s1, s2):
@@ -1239,6 +1241,7 @@ usage: canu [-version] [-citation] \
     shutil.move(os.path.join(WorkDir, "canu.contigs.fasta"), os.path.join(WorkDir, "contigs.fasta"))
     return os.path.join(WorkDir, "contigs.fasta")
 
+"""
 def write_html_report():
     htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
     HTML = open(htmlFile, 'w')
@@ -1251,6 +1254,9 @@ def write_html_report():
         if ":" in item:
             layout = "paired"
         HTML.write("<tr><td>"+item+"</td><td>Illumina</td><td>"+layout+"</td>")
+        if item in details["read_file"
+        *** need to ensure details are picked up during processing read files
+"""
 
 def main():
     global Start_time
