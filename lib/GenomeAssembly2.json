@@ -30,14 +30,13 @@
 			    "type": "wstype"
 			},
 			{ 
-				# add iontorrent
 			    "id":"platform",
 			    "label":"Sequencing Platform",
 			    "required": 0,
 			    "default": "infer",
 			    "desc":"Sequencing platform used to generate the read library",
 			    "type":"enum",
-			    "enum": ["infer", "illumina", "pacbio", "nanopore", "iontorrent"]
+			    "enum": ["infer", "illumina", "iontorrent"]
 			},
 			{
 				# not supported
@@ -81,7 +80,6 @@
 		    "default" : null,
 		    "group":[
 			{
-				# we only support fastq now
 			    "id": "read",
 			    "required": 1,
 			    "label": "Read file",
@@ -90,7 +88,6 @@
 			    "type": "wstype"
 			},
 			{
-				# yes, but add iontorrent
 			    "id":"platform",
 			    "label":"Sequencing Platform",
 			    "required": 0,
@@ -102,7 +99,6 @@
 		    ]
 		},
 		{
-			# yes
 			"id": "srr_ids",
 			"required": 0,
 		        "allow_multiple": true,
@@ -129,7 +125,7 @@
 			"default": "auto",
 			"desc":"Recipe used for assembly",
 			"type":"enum",
-			"enum": ["auto", "unicycler", "spades", "canu" ]
+			"enum": ["auto", "unicycler", "canu", "spades", "meta-spades", "plasmid-spades", "single-cell" ]
 		},
 		{
 			# new parameter
@@ -137,6 +133,7 @@
 			"label":"Racon iterations",
 			"required": 0,
 			"default": 2,
+			#"range": [0,1,2,3,4]
 			"desc":"Racon polishing iterations (for long reads)",
 			"type":"int"
 		},
@@ -146,6 +143,7 @@
 			"label":"Pilon iterations",
 			"required": 0,
 			"default": 2,
+			#"range": [0,1,2,3,4]
 			"desc":"Pilon polishing iterations (for short reads)",
 			"type":"int"
 		},
@@ -186,7 +184,6 @@
 			"type":"folder"
 		},
 		{
-			# This could be called "output file prefix", or could be left as is
 			"id":"output_file",
 			"label":"File Basename",
 			"required": 1,
