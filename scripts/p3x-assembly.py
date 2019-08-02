@@ -491,25 +491,15 @@ def fetch_sra_files(args, details):
                 continue
 
         LOG.write("Runinfo for %s reports LibraryLayout = %s\n"%(sra, runinfo['LibraryLayout']))
-        if runinfo['LibraryLayout'].startswith("SINGLE"):
-            fastqFile = os.path.join(WorkDir, sra+".fastq")   
-            if os.path.exists(fastqFile):
-                listToAddTo.append(fastqFile)
-            else:
-                LOG.write("Problem: file %s.fastq does not exist\n"%(sra))
-                continue
-        elif runinfo['LibraryLayout'].startswith("PAIRED"):
-            fastqFiles = glob.glob(os.path.join(WorkDir, sra+"*fastq"))
-            LOG.write("Number of fastq files from sra is %d"%len(fastqFiles))
-            if len(fastqFiles):
-                LOG.write("Fastq files from sra: %s"%(" ".join(fastqFiles)))
-            if len(fastqFiles) >= 2:
-                filename = ":".join(sorted(fastqFiles))
-                listToAddTo.append(filename)
-            elif len(fastqFiles) == 1:
-                listToAddTo.append(fastqFiles[0])
-        else:
-            LOG.write("Unknown library layout: %s\n"%runinfo['LibraryLayout'])
+        fastqFiles = glob.glob(os.path.join(WorkDir, sra+"*fastq"))
+        LOG.write("Number of fastq files from sra is %d"%len(fastqFiles))
+        if len(fastqFiles):
+            LOG.write("Fastq files from sra: %s"%(" ".join(fastqFiles)))
+        if len(fastqFiles) >= 2:
+            filename = ":".join(sorted(fastqFiles))
+            listToAddTo.append(filename)
+        elif len(fastqFiles) == 1:
+            listToAddTo.append(fastqFiles[0])
     return
 
 def organize_read_files(args, details):
