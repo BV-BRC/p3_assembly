@@ -1121,6 +1121,7 @@ usage: canu [-version] [-citation] \
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     command = ["canu", "-d", WorkDir, "-p", "canu", "useGrid=false", "genomeSize=%s"%args.genome_size]
     command.extend(["maxMemory=" + str(args.memory), "maxThreads=" + str(args.threads)])
+    command.append("stopOnReadQuality=false")
     """
     https://canu.readthedocs.io/en/latest/parameter-reference.html
     """
