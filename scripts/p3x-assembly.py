@@ -494,16 +494,16 @@ def fetch_sra_files(args, details):
         fastqFiles = glob.glob(os.path.join(WorkDir, sra+"*fastq"))
         LOG.write("Number of fastq files from sra is %d"%len(fastqFiles))
         if len(fastqFiles):
-            LOG.write("Fastq files from sra: %s"%(" ".join(fastqFiles)))
-        if len(fastqFiles) >= 2:
-            filename = ":".join(sorted(fastqFiles))
-            listToAddTo.append(filename)
-        elif len(fastqFiles) == 1:
-            listToAddTo.append(fastqFiles[0])
+            LOG.write("Fastq files from sra: %s\n"%(" ".join(fastqFiles)))
+            if runinfo['LibraryLayout'].startswith("PAIRED") and len(fastqFiles) >= 2:
+                filePair = ":".join(sorted(fastqFiles))
+                listToAddTo.append(filePair)
+            else:
+                listToAddTo.extend(fastqFiles)
     return
 
 def organize_read_files(args, details):
-    LOG.write("organize_read_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
+    LOG.write("\norganize_read_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     fileItemType={}
     filePairs=[]
     singleFiles=[]
