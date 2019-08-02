@@ -452,7 +452,10 @@ def fetch_sra_files(args, details):
             sra= sra[:-4]
         runinfo = sra_tools.get_runinfo(sra)
         LOG.write("Runinfo for %s reports platform = %s\n"%(sra, runinfo["Platform"]))
+
+        programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
         if runinfo['Platform'] == 'PACBIO_SMRT':
+            programToUse = 'fastq-dump'
             if not args.pacbio:
                 args.pacbio = []
             listToAddTo = args.pacbio
@@ -465,6 +468,7 @@ def fetch_sra_files(args, details):
                 args.iontorrent = []
             listToAddTo = args.iontorrent
         elif runinfo['Platform'] == "OXFORD_NANOPORE":
+            programToUse = 'fastq-dump'
             if not args.nanopore:
                 args.nanopore = []
             listToAddTo = args.nanopore
@@ -472,7 +476,7 @@ def fetch_sra_files(args, details):
             LOG.write("Problem: Cannot process sra data from platform %s\n"%runinfo['Platform'])
             continue
 
-        command = ["fasterq-dump", "-O", WorkDir, "--split-files", sraFull]
+        command = [programToUse, "-O", WorkDir, "--split-files", sraFull]
         stime = time()
         LOG.write("command = "+" ".join(command)+"\n")
         return_code = subprocess.call(command, shell=False, stderr=LOG)
