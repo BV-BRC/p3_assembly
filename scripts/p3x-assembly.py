@@ -432,8 +432,25 @@ def categorize_anonymous_read_files(args, details):
                 details["transformation"].append(comment)
     return
 
+def get_runinfo(run_accession):
+    """ take sra run accession (like SRR123456)
+    return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
+    Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
+    """
+    runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+run_accession
+    r = urllib2.urlopen(runinfo_url)
+    if not run.startswith("Run"):
+        return None
+    lines = r.read().split("\n")
+    keys   = lines[0].split(",")
+    for line in lines[1:]:
+        if line.startswith(run_accession):
+            values = line.split(",")
+    runinfo = dict(zip(keys, values))
+    return runinfo
+
 def fetch_sra_files(args, details):
-    """ Need to change this to call external library Zane and Andew wrote
+    """ 
     Use ftp to get all SRA files.
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     Append to appropriate parts of args (e.g., args.illumina or args.iontorrent).
@@ -451,6 +468,9 @@ def fetch_sra_files(args, details):
         if sra.endswith(".sra"):
             sra= sra[:-4]
         runinfo = sra_tools.get_runinfo(sra)
+        if not runinfo:
+            LOG.write("runinfo for %s was empty, skipping\n"%sra)
+            continue 
         LOG.write("Runinfo for %s reports platform = %s\n"%(sra, runinfo["Platform"]))
 
         programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
@@ -492,7 +512,7 @@ def fetch_sra_files(args, details):
 
         LOG.write("Runinfo for %s reports LibraryLayout = %s\n"%(sra, runinfo['LibraryLayout']))
         fastqFiles = glob.glob(os.path.join(WorkDir, sra+"*fastq"))
-        LOG.write("Number of fastq files from sra is %d"%len(fastqFiles))
+        LOG.write("Number of fastq files from sra is %d\n"%len(fastqFiles))
         if len(fastqFiles):
             LOG.write("Fastq files from sra: %s\n"%(" ".join(fastqFiles)))
             if runinfo['LibraryLayout'].startswith("PAIRED") and len(fastqFiles) >= 2:
@@ -1217,7 +1237,7 @@ def main():
     parser.add_argument('-m', '--memory', metavar='GB', type=int, default=250, help='RAM limit in Gb')
     parser.add_argument('--trim_galore', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
-    parser.add_argument('--bandage', help='generate image of assembly path using Bandage')
+    parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help="JSON file with additional information.")
 
     if len(sys.argv) == 1:
