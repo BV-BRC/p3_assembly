@@ -480,7 +480,7 @@ def fetch_sra_files(args, details):
         sraFull = sra
         if sra.endswith(".sra"):
             sra= sra[:-4]
-        runinfo = sra_tools.get_runinfo(sra)
+        runinfo = get_runinfo(sra)
         if not runinfo:
             LOG.write("runinfo for %s was empty, skipping\n"%sra)
             continue 
