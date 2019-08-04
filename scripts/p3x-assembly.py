@@ -147,10 +147,6 @@ def trimGalore(args, details):
                 trimReads2 = trimReads2.replace(".fastq", "_val_2.fq")
                 trimReads2 = os.path.join(WorkDir, trimReads2)
                 if os.path.exists(trimReads1) and os.path.exists(trimReads2):
-                    #shutil.move(trimReads1, trimReads1.replace("_val_1.fq", "_trimmed.fastq"))
-                    #trimReads1 = trimReads1.replace("_val_1.fq", "_trimmed.fastq")
-                    #shutil.move(trimReads2, trimReads2.replace("_val_2.fq", "_trimmed.fastq"))
-                    #trimReads2 = trimReads2.replace("_val_2.fq", "_trimmed.fastq")
                     comment = "trim_galore, input %s, output %s"%(reads, trimReads1+":"+trimReads2)
                     LOG.write(comment+"\n")
                     details["transformation"].append(comment)
@@ -166,8 +162,6 @@ def trimGalore(args, details):
                 trimReads = trimReads.replace(".fastq", "_trimmed.fq")
                 trimReads = os.path.join(WorkDir, trimReads)
                 if os.path.exists(trimReads):
-                    #shutil.move(trimReads, trimReads.replace(".fq", ".fastq"))
-                    #trimReads = trimReads.replace(".fq", ".fastq")
                     comment = "trim_galore, input %s, output %s"%(reads, trimReads)
                     LOG.write(comment+"\n")
                     details["transformation"].append(comment)
@@ -437,22 +431,36 @@ def get_runinfo(run_accession):
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
     Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
     """
+    LOG.write("get_runinfo(%s)\n"%run_accession)
     runinfo = None
     runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+run_accession
-    text = urllib2.urlopen(runinfo_url)
+    text = urllib2.urlopen(runinfo_url).read()
     if text.startswith("Run"):
-        lines = r.read().split("\n")
+        lines = text.split("\n")
         keys   = lines[0].split(",")
         for line in lines[1:]:
             if line.startswith(run_accession):
                 values = line.split(",")
-        runinfo = dict(zip(keys, values))
-    else:
-        LOG.write("Problem, runinfo request failed. Trying alternative from web page.\n")
+                runinfo = dict(zip(keys, values))
+        if not runinfo or runinfo['Platform'] not in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
+            # rescue case of mis-alignment between keys and values
+            LOG.write("problem in get_runinfo: sra.cgi returned:\n"+text+"\n")
+            runinfo = None
+            if values:
+                for val in values:
+                    if val in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
+                        runinfo = {'Platform': val}
+                        for val2 in values:
+                            if val2 in ('PAIRED', 'SINGLE'):
+                                runinfo['LibraryLayout'] = val2
+                        break
+
+    if not runinfo:
+        LOG.write("Problem, normal runinfo request failed. Trying alternative from web page.\n")
         runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/?run="+run_accession
-        text = urllib2.urlopen(runinfo_url)
+        text = urllib2.urlopen(runinfo_url).read()
         if re.search("<td>Illumina", text, re.IGNORECASE):
-            runinfo = {'ILLUMINA': 'PACBIO_SMRT'}
+            runinfo = {'Platform': 'ILLUMINA'}
         elif re.search("<td>PacBio", text, re.IGNORECASE):
             runinfo = {'Platform': 'PACBIO_SMRT'}
         elif re.search("<td>Oxford", text, re.IGNORECASE):
@@ -750,15 +758,23 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
                 OUT.write(contigId+"\n")
                 for i in range(0, len(seq), 60):
                     OUT.write(seq[i:i+60]+"\n")
+    comment = "trimContigsByMinLength, input %s, output %s"%(inputFile, outputFile)
+    LOG.write(comment+"\n")
+    details["transformation"].append(comment)
 
-def runBandage():
+def runBandage(details):
     gfaFile = os.path.join(SaveDir, prefix+"assembly_graph.gfa")
     imageFormat = ".jpg"
     if os.path.exists(gfaFile):
-        command = ["Bandage", "image", gfaFile, gfaFile.replace(".gfa", ".plot"+imageFormat)]
+        plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
+        command = ["Bandage", "image", gfaFile, plotFile]
         LOG.write("Bandage command =\n"+" ".join(command)+"\n")
         return_code = subprocess.call(command, shell=False, stderr=LOG)
         LOG.write("return code = %d\n"%return_code)
+        if return_code == 0:
+            details["Bandage plot"] = prefix+"assembly_graph.plot"+imageFormat
+        else:
+            LOG.write("Error creating Bandage plot\n")
 
 
 def runUnicycler(args, details):
@@ -946,10 +962,12 @@ def runRacon(contigFile, longReadsFastq, args, details):
         return None
     details['racon time'] = time()-tempTime
     raconContigSize = os.path.getsize(raconContigs)
-    if raconContigSize > 10:
-        return raconContigs
-    else:
+    if raconContigSize < 10:
         return None
+    comment = "racon, input %s, output %s"%(contigFile, raconContigs)
+    LOG.write(comment+"\n")
+    details["transformation"].append(comment)
+    return raconContigs
 
 def runBowtie(contigFile, shortReadFastq, threads=1, output='bam'):
     """
@@ -1029,6 +1047,10 @@ def runPilon(contigFile, shortReadFastq, args, details):
         for line in CHANGES:
             numChanges += 1
     LOG.write("Number of changes made by pilon was %d\n"%numChanges)
+
+    comment = "pilon, input %s, output %s"%(contigFile, pilonContigs)
+    LOG.write(comment+"\n")
+    details["transformation"].append(comment)
     return pilonContigs 
 
 def calcReadDepth(bamfiles):
@@ -1207,6 +1229,7 @@ usage: canu [-version] [-citation] \
 """
 def write_html_report():
     htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
+    LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
     HTML.write("<h1>Genome Assembly Report</h1>\n")
 
@@ -1218,8 +1241,7 @@ def write_html_report():
             layout = "paired"
         HTML.write("<tr><td>"+item+"</td><td>Illumina</td><td>"+layout+"</td>")
         if item in details["read_file"
-        *** need to ensure details are picked up during processing read files
-"""
+"""     
 
 def main():
     global Start_time
@@ -1377,7 +1399,7 @@ def main():
         saveContigsFile = os.path.join(SaveDir, args.prefix+"contigs.fasta")
         filterContigsByMinLength(contigs, saveContigsFile, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
         runQuast(saveContigsFile, args)
-        runBandage()
+        runBandage(details)
 
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
