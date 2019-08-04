@@ -678,6 +678,8 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
     LOG.write("filterContigsByMinLength(%s, %s, %d) elapsed seconds = %f\n"%(inputFile, outputFile, args.min_contig_length, time()-Start_time))
     with open(inputFile) as IN:
         with open(outputFile, 'w') as OUT:
+            shortCovTags = [['sdepth', 'snorm_depth'], ['depth', 'norm_depth']][longReadDepth == None]
+            longCovTags = [['ldepth', 'lnorm_depth'], ['depth', 'norm_depth']][shortReadDepth == None]
             seqId=None
             seq = ""
             i = 1
@@ -688,10 +690,10 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
                         contigId = ">"+args.prefix+"contig_%d length %5d"%(i, len(seq))
                         if shortReadDepth and seqId in shortReadDepth:
                             meanDepth, length, normalizedDepth = shortReadDepth[seqId]
-                            contigId += " scov %.01f sdepth %.2f"%(meanDepth, normalizedDepth)
+                            contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
                         if longReadDepth and seqId in longReadDepth:
                             meanDepth, length, normalizedDepth = longReadDepth[seqId]
-                            contigId += " lcov %.01f ldepth %.2f"%(meanDepth, normalizedDepth)
+                            contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
                         if "contigCircular" in details and seqId in details["contigCircular"]:
                             contigId += " circular=true"
                         OUT.write(contigId+"\n")
@@ -706,15 +708,25 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
                 contigId = ">"+args.prefix+"contig_%d length %5d"%(i, len(seq))
                 if shortReadDepth and seqId in shortReadDepth:
                     meanDepth, length, normalizedDepth = shortReadDepth[seqId]
-                    contigId += " srcov %.01f srdepth %.2f"%(meanDepth, normalizedDepth)
+                    contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
                     if int(float(length)) != len(seq):
                         LOG.write("len for %s conflict: %d vs %d\n"%(seqId, int(float(length)), len(seq)))
                 if longReadDepth and seqId in longReadDepth:
                     meanDepth, length, normalizedDepth = longReadDepth[seqId]
-                    contigId += " lcov %.01f ldepth %.2f"%(meanDepth, normalizedDepth)
+                    contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
                 OUT.write(contigId+"\n")
                 for i in range(0, len(seq), 60):
                     OUT.write(seq[i:i+60]+"\n")
+
+def runBandage():
+    gfaFile = os.path.join(SaveDir, prefix+"assembly_graph.gfa")
+    imageFormat = ".jpg"
+    if os.path.exists(gfaFile):
+        command = ["Bandage", "image", gfaFile, gfaFile.replace(".gfa", ".plot"+imageFormat)]
+        LOG.write("Bandage command =\n"+" ".join(command)+"\n")
+        return_code = subprocess.call(command, shell=False, stderr=LOG)
+        LOG.write("return code = %d\n"%return_code)
+
 
 def runUnicycler(args, details):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
@@ -1156,6 +1168,7 @@ usage: canu [-version] [-citation] \
         return None
     # rename to canonical contigs.fasta
     shutil.move(os.path.join(WorkDir, "canu.contigs.fasta"), os.path.join(WorkDir, "contigs.fasta"))
+    shutil.move(os.path.join(WorkDir, "canu.contigs.gfa"), os.path.join(SaveDir, prefix+"assembly_graph.gfa"))
     return os.path.join(WorkDir, "contigs.fasta")
 
 """
@@ -1204,6 +1217,7 @@ def main():
     parser.add_argument('-m', '--memory', metavar='GB', type=int, default=250, help='RAM limit in Gb')
     parser.add_argument('--trim_galore', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
+    parser.add_argument('--bandage', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help="JSON file with additional information.")
 
     if len(sys.argv) == 1:
@@ -1330,6 +1344,7 @@ def main():
         saveContigsFile = os.path.join(SaveDir, args.prefix+"contigs.fasta")
         filterContigsByMinLength(contigs, saveContigsFile, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
         runQuast(saveContigsFile, args)
+        runBandage()
 
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
