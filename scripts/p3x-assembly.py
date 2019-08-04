@@ -11,7 +11,7 @@ import shutil
 import urllib2
 from time import time, localtime, strftime
 import json
-import sra_tools
+#import sra_tools
 import glob
 
 """
@@ -437,16 +437,29 @@ def get_runinfo(run_accession):
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
     Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
     """
+    runinfo = None
     runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+run_accession
-    r = urllib2.urlopen(runinfo_url)
-    if not run.startswith("Run"):
-        return None
-    lines = r.read().split("\n")
-    keys   = lines[0].split(",")
-    for line in lines[1:]:
-        if line.startswith(run_accession):
-            values = line.split(",")
-    runinfo = dict(zip(keys, values))
+    text = urllib2.urlopen(runinfo_url)
+    if text.startswith("Run"):
+        lines = r.read().split("\n")
+        keys   = lines[0].split(",")
+        for line in lines[1:]:
+            if line.startswith(run_accession):
+                values = line.split(",")
+        runinfo = dict(zip(keys, values))
+    else:
+        LOG.write("Problem, runinfo request failed. Trying alternative from web page.\n")
+        runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/?run="+run_accession
+        text = urllib2.urlopen(runinfo_url)
+        if re.search("<td>Illumina", text, re.IGNORECASE):
+            runinfo = {'ILLUMINA': 'PACBIO_SMRT'}
+        elif re.search("<td>PacBio", text, re.IGNORECASE):
+            runinfo = {'Platform': 'PACBIO_SMRT'}
+        elif re.search("<td>Oxford", text, re.IGNORECASE):
+            runinfo = {'Platform': 'OXFORD_NANOPORE'}
+        elif re.search("<td>Ion Torrent", text, re.IGNORECASE):
+            runinfo = {'Platform': 'ION_TORRENT'}
+
     return runinfo
 
 def fetch_sra_files(args, details):
