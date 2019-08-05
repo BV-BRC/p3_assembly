@@ -762,8 +762,8 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
     LOG.write(comment+"\n")
     details["transformation"].append(comment)
 
-def runBandage(details):
-    gfaFile = os.path.join(SaveDir, prefix+"assembly_graph.gfa")
+def runBandage(args, details):
+    gfaFile = os.path.join(SaveDir, args.prefix+"assembly_graph.gfa")
     imageFormat = ".jpg"
     if os.path.exists(gfaFile):
         plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
@@ -1399,7 +1399,7 @@ def main():
         saveContigsFile = os.path.join(SaveDir, args.prefix+"contigs.fasta")
         filterContigsByMinLength(contigs, saveContigsFile, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
         runQuast(saveContigsFile, args)
-        runBandage(details)
+        runBandage(args, details)
 
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
