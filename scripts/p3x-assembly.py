@@ -994,7 +994,7 @@ def runBandage(args, details):
             return_code = subprocess.call(command, shell=False, stderr=LOG)
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
-                details["Bandage plot"] = prefix+"assembly_graph.plot"+imageFormat
+                details["Bandage plot"] = args.prefix+"assembly_graph.plot"+imageFormat
             else:
                 LOG.write("Error creating Bandage plot\n")
         except OSError as ose:
@@ -1522,12 +1522,18 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
-
-
+    
     HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
     for line in details["post-assembly transformation"]:
         HTML.write("<p>"+line+"<br>\n")
     HTML.write("</div>\n")
+
+    if "Bandage plot" in details:
+        HTML.write("<h3>Bandage Plot</h3>\n")
+        HTML.write("<div class='a'>")
+        HTML.write("<img src='%s'>\n"%(details["Bandage plot"]))
+        HTML.write("</div>\n")
+
 
 
 def main():
