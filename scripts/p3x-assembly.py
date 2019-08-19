@@ -41,6 +41,61 @@ Start_time = None
 WorkDir = None
 SaveDir = None
 
+def registerReads(details, reads, platform=None):
+    """
+    create an entry in details for these reads
+    """
+    if "reads" not in details:
+        details["reads"] = {}
+    if 'original_items' not in details:
+        details['original_items'] = set()
+    if reads in details["original_item"]:
+        comment = "dulicate registration of reads %s"%reads
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        return None
+    details['original_items'].add(item)
+    details[
+    readStruct = {}
+    readStruct["files"] = []
+    if ":" in reads or "%" in reads:
+        if ":" in reads:
+            delim = ["%", ":"][":" in reads] # ":" if it is, else "%"
+        read1, read2 = reads.split(delim)
+        readStruct["delim"] = delim
+        if not os.path.exists(read1):
+            comment = "file does not exist: %s"%read1
+            LOG.write(comment+"\n")
+            details["problem"].append(comment)
+            return None
+        if not os.path.exists(read2):
+            comment = "file does not exist: %s"%read2
+            LOG.write(comment+"\n")
+            details["problem"].append(comment)
+            return None
+        readStruct["files"].append( os.path.split(read1))
+        readStruct["files"].append( os.path.split(read2))
+        # the "files" entry is an array1 of tuples, each tuple is a path, basename yielded by os.path.split
+        normalizedReads = delim.join(sorted(readStruct["files"][0][1], readStruct["files"][1][1]))
+    else:
+        # no ':' or '%' delimiter, so a single file
+        if not os.path.exists(reads)::
+            comment = "file does not exist: %s"%reads
+            LOG.write(comment+"\n")
+            details["problem"].append(comment)
+            return None
+        readStruct["files"].append(os.path.split(reads))
+        normalizedReads = readStruct["files"][0][1]
+
+    if platform:
+        readStruct['platform'] = platform
+    details['reads'][normalizedReads]=readStruct
+    if len(readStruct['files'] == 2)
+        studyPairedReads(registeredName, details)
+    else:
+        studySingleReads(registeredName, details)
+    return normalizedReads
+
 def parseJasonParameters(args):
     if not os.path.exists(args.params_json):
         raise Exception("cannot find json parameters file %s\n"%args.params_json)
@@ -1548,7 +1603,7 @@ def main():
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False, default=[])
     parser.add_argument('--sra', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--anonymous_reads', nargs='*', help="unspecified read files, types automatically inferred.")
-    parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are paire-interleaved')
+    parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'auto'], help='assembler to use', default='auto')
 
     parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
@@ -1608,35 +1663,35 @@ def main():
 
     #organize_read_files(args, details)
     if args.illumina:
+        replacementList=[]
         for item in args.illumina:
-            details['original_items'].append(item)
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'illumina'
-            if ':' in item or '%' in item:
-                studyPairedReads(item, details)
-            else:
-                studySingleReads(item, details)
+            registeredName = registerReads(details, item, platform='illumina')
+            replacementList.append(registeredName)
+        LOG.write("After registering illumina reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.illumina), " ".join(replacementList)))
+        args.illumina = replacementList
+
     if args.iontorrent:
+        replacementList=[]
         for item in args.iontorrent:
-            details['original_items'].append(item)
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'iontorrent'
-            if ':' in item or '%' in item:
-                studyPairedReads(item, details)
-            else:
-                studySingleReads(item, details)
+            registeredName = registerReads(details, item, platform='iontorrent')
+            replacementList.append(registeredName)
+        LOG.write("After registering iontorrent reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.iontorrent), " ".join(replacementList)))
+        args.iontorrent = replacementList
+
     if args.pacbio:
+        replacementList=[]
         for item in args.pacbio:
-            details['original_items'].append(item)
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'pacbio'
-            studySingleReads(item, details)
+            registeredName = registerReads(details, item, platform='pacbio')
+            replacementList.append(registeredName)
+        LOG.write("After registering pacbio reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.pacbio), " ".join(replacementList)))
+        args.pacbio = replacementList
     if args.nanopore:
+        replacementList=[]
         for item in args.nanopore:
-            details['original_items'].append(item)
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'nanopore'
-            studySingleReads(item, details)
+            registeredName = registerReads(details, item, platform='nanopore')
+            replacementList.append(registeredName)
+        LOG.write("After registering nanopore reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.nanopore), " ".join(replacementList)))
+        args.nanopore = replacementList
 
     if args.anonymous_reads:
         for item in args.anonymous_reads:
