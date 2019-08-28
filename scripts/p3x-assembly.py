@@ -41,7 +41,7 @@ Start_time = None
 WorkDir = None
 SaveDir = None
 
-def registerReads(details, reads, platform=None):
+def registerReads(details, reads, platform=None, interleaved=False):
     """
     create an entry in details for these reads
     """
@@ -84,6 +84,8 @@ def registerReads(details, reads, platform=None):
             LOG.write(comment+"\n")
             details["problem"].append(comment)
             return None
+        if interleaved:
+            readStruct["interleaved"] = True
         readStruct["files"].append(os.path.split(reads))
         normalizedReads = readStruct["files"][0][1]
 
@@ -598,8 +600,9 @@ def findSingleDifference(s1, s2):
 def categorize_anonymous_read_files(args, details):
     LOG.write("categorize_anonymous_read_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     LOG.write("  files=%s\n"%("\t".join(args.anonymous_reads)))
+    read_file_type = {}
     for filename in args.anonymous_reads:
-        studyReadFile(filename, details)
+        read_file_type = studyReadFile(filename, details)
 
     # try to find paired files
     membersOfPairs = set()
@@ -616,28 +619,34 @@ def categorize_anonymous_read_files(args, details):
                     elif intDiffs[1] == 1 and intDiffs[0] == 2:
                         pairedFiles = (filename2, filename1)
                     if pairedFiles:
-                        if Read_file_type[filename1] != Read_file_type[filename2]:
-                            LOG.write("Discordant fileTypes for %s vs %s, %s vs %s\n"%(filename1, filename2, Read_file_type[filename1], Read_file_type[filename2]))
-                        if Read_file_type[filename1] == 'illumina':
+                        if read_file_type[filename1] != read_file_type[filename2]:
+                            LOG.write("Discordant fileTypes for %s vs %s, %s vs %s\n"%(filename1, filename2, read_file_type[filename1], read_file_type[filename2]))
+                        if read_file_type[filename1] == 'illumina':
+                            platform = "illumina"
+                            registeredName = registerReads(details, ":".join(pairedFiles), platform=platform)
                             if not args.illumina:
                                 args.illumina = []
-                            args.illumina.append(":".join(pairedFiles))
+                            args.illumina.append(registeredName)
                             comment = "interpreting pair %s %s as type 'illumina'"%pairedFiles
                             LOG.write(comment+"\n")
                             details["pre-assembly transformation"].append(comment)
-                        elif Read_file_type[filename1] == 'iontorrent':
+                        elif read_file_type[filename1] == 'iontorrent':
+                            platform = "iontorrent"
+                            registeredName = registerReads(details, " :".join(pairedFiles), platform=platform)
                             if not args.iontorrent:
                                 args.iontorrent = []
-                            args.iontorrent.append(":".join(pairedFiles))
+                            args.iontorrent.append(registeredName)
                             comment = "interpreting pair %s %s as type 'iontorrent'"%pairedFiles
                             LOG.write(comment+"\n")
                             details["pre-assembly transformation"].append(comment)
                         else: # neither illumina vs iontorrent, perhaps 'sra'
                             if Avg_read_length[filename1] < Max_short_read_length:
                                 #call it illumina
+                                platform = "illumina"
+                                registeredName = registerReads(details, ":".join(pairedFiles), platform=platform)
                                 if not args.illumina:
-                                    args.illumina=[]
-                                args.illumina.append(":".join(pairedFiles))
+                                    args.illumina = []
+                                args.illumina.append(registeredName)
                                 comment = "interpreting pair %s %s as type 'illumina'"%pairedFiles
                                 LOG.write(comment+"\n")
                                 details["pre-assembly transformation"].append(comment)
@@ -648,82 +657,101 @@ def categorize_anonymous_read_files(args, details):
 
     for filename in args.anonymous_reads:
         if filename not in membersOfPairs:
-            if Read_file_type[filename] == 'illumina':
+            if read_file_type[filename] == 'illumina':
+                platform = 'illumina'
+                registeredName = registerReads(details, filename, platform=platform)
                 if not args.illumina:
                     args.illumina = []
-                args.illumina.append(filename)
+                args.illumina.append(registeredName)
                 comment = "interpreting file %s as type 'illumina'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
-            elif Read_file_type[filename] == 'iontorrent':
+            elif read_file_type[filename] == 'iontorrent':
+                platform = 'iontorrent'
+                registeredName = registerReads(details, filename, platform=platform)
                 if not args.iontorrent:
                     args.iontorrent = []
-                args.iontorrent.append(filename)
+                args.iontorrent.append(registeredName)
                 comment = "interpreting file %s as type 'iontorrent'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
-            elif Read_file_type[filename] == 'pacbio':
+            elif read_file_type[filename] == 'pacbio':
+                registeredName = registerReads(details, filename, platform='pacbio')
                 if not args.pacbio:
                     args.pacbio = []
-                args.pacbio.append(filename)
+                args.pacbio.append(registeredName)
                 comment = "interpreting file %s as type 'pacbio'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
-            elif Read_file_type[filename] == 'nanopore':
+            elif read_file_type[filename] == 'nanopore':
+                registeredName = registerReads(details, filename, platform='nanopore')
                 if not args.nanopore:
                     args.nanopore = []
-                args.nanopore.append(filename)
+                args.nanopore.append(registeredName)
                 comment = "interpreting file %s as type 'nanopore'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
             elif Avg_read_length[filename] < Max_short_read_length:
                 #call it illumina
+                registeredName = registerReads(details, filename, platform='illumina')
                 if not args.illumina:
                     args.illumina=[]
-                args.illumina.append(filename)
+                args.illumina.append(registeredName)
                 comment = "interpreting file %s as type 'illumina'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
             else:
+                # call it pacbio
+                registeredName = registerReads(details, filename, platform='pacbio')
                 if not args.pacbio:
                     args.pacbio=[]
-                args.pacbio.append(filename)
+                args.pacbio.append(registeredName)
                 comment = "interpreting file %s as type 'pacbio'"%filename
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
     return
 
-def get_runinfo(run_accession):
+def get_runinfo(run_accession, log=None):
     """ take sra run accession (like SRR123456)
+    Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
     Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
+    If efetch doesn't work, try scraping the web page.
     """
     LOG.write("get_runinfo(%s)\n"%run_accession)
+    if run_accession.endswith(".sra"):
+        run_accession = run_accession[:-4]
     runinfo = None
     runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&db=sra&rettype=runinfo&term="+run_accession
     text = urllib2.urlopen(runinfo_url).read()
     if text.startswith("Run"):
         lines = text.split("\n")
         keys   = lines[0].split(",")
-        for line in lines[1:]:
+        for line in lines[1:]:  # there might be multiple rows, only one of which is for our sra run accession
             if line.startswith(run_accession):
                 values = line.split(",")
                 runinfo = dict(zip(keys, values))
-        if not runinfo or runinfo['Platform'] not in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
+        if not runinfo:
+            return None
+        if runinfo['Platform'] not in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
             # rescue case of mis-alignment between keys and values
-            LOG.write("problem in get_runinfo: sra.cgi returned:\n"+text+"\n")
-            runinfo = None
-            if values:
-                for val in values:
-                    if val in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
-                        runinfo = {'Platform': val}
-                        for val2 in values:
-                            if val2 in ('PAIRED', 'SINGLE'):
-                                runinfo['LibraryLayout'] = val2
-                        break
+            if log:
+                log.write("problem in get_runinfo: sra.cgi returned:\n"+text+"\n")
+            for val in values:
+                if val in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
+                    runinfo['Platform'] = val
+                    break
+        if runinfo['LibraryLayout'] not in ('PAIRED', 'SINGLE'):        
+            if log:
+                log.write("Need to search for LibraryLayout: bad value: %s\n"runinfo['LibraryLayout']
+            for val in values:
+                if val in ('PAIRED', 'SINGLE'):
+                    runinfo['LibraryLayout'] = val
+                    break
 
     if not runinfo:
-        LOG.write("Problem, normal runinfo request failed. Trying alternative from web page.\n")
+        if log:
+            log.write("Problem, normal runinfo request failed. Trying alternative from web page.\n")
         runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/?run="+run_accession
         text = urllib2.urlopen(runinfo_url).read()
         if re.search("<td>Illumina", text, re.IGNORECASE):
@@ -736,84 +764,106 @@ def get_runinfo(run_accession):
             runinfo = {'Platform': 'ION_TORRENT'}
     return runinfo
 
-def fetch_sra_file(sra, args, details):
+def fetch_one_sra(sra, run_info=None, log=sys.stderr):
+    """ requires run_info to know which program to use
+    """
+    if not run_info:
+        run_info = get_runinfo(sra, log)
+    programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
+    if runinfo['Platform'].startswith("PACBIO") or runinfo['Platform'].startsWith("OXFORD_NANOPORE"):
+        programToUse = 'fastq-dump'
+    command = [programToUse, "--split-files", sra]
+    log.write("command = "+" ".join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stderr=log)
+    LOG.write("return_code = %d, time=%d seconds\n"%(return_code, time()-stime))
+    if return_code != 0:
+        log.write("Problem, %s return code was %d\n"%(programToUse, return_code))
+
+        log.write("Try one more time.\n")
+        return_code = subprocess.call(command, shell=False, stderr=LOG)
+        log.write("Return code on second try was %d\n"%return_code)
+        if return_code != 0:
+            LOG.write("Giving up on %s\n"%sra)
+    return
+
+def fetch_sra_files(args, details):
     """ 
-    Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     Append to appropriate parts of args (e.g., args.illumina or args.iontorrent).
     """
     LOG.write("fetch_sra_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     LOG.write("args.sra="+" ".join(args.sra)+"\n")
-    sraFull = sra
-    if sra.endswith(".sra"):
-        sra= sra[:-4]
-    runinfo = get_runinfo(sra)
-    if not runinfo:
-        LOG.write("runinfo for %s was empty, giving up\n"%sra)
-        return
-    LOG.write("Runinfo for %s reports platform = %s and LibraryLayout = %s\n"%(sra, runinfo["Platform"], runinfo['LibraryLayout']))
+    for sra in args.sra:
+        sraFull = sra
+        sra = sraFull.replace(".sra", "")
+        runinfo = get_runinfo(sra)
+        if not runinfo:
+            LOG.write("runinfo for %s was empty, giving up\n"%sra)
+            continue
+        LOG.write("Runinfo for %s reports platform = %s and LibraryLayout = %s\n"%(sra, runinfo["Platform"], runinfo['LibraryLayout']))
 
-    programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
-    if runinfo['Platform'].startswith("PACBIO"):
-        programToUse = 'fastq-dump'
-        if not args.pacbio:
-            args.pacbio = []
-        listToAddTo = args.pacbio
-    elif runinfo['Platform'] == "ILLUMINA":
+        fetch_one_sra(sraFull, runinfo, LOG)
+        fastqFiles = glob.glob(sra+"*fastq")
+        LOG.write("Fastq files from sra: %s\n"%str(fastqFiles))
+        item = None
+        if runinfo['LibraryLayout'].startswith("PAIRED"):
+            if len(fastqFiles) == 2:
+                item = ":".join(sorted(fastqFiles)[:2])
+            else:
+                comment = "for PAIRED library %s, number of files was %s, expected 2"%(sra, len(fastqFiles))
+                details['problem'].append(comment)
+                LOG.write(comment+"\n")
+        if not item: # library layout single or failed above
+            if len(fastqFiles) == 1:
+                item = fastqFiles[0]
+            if len(fastqFiles) > 1:
+                comment = "for library %s, number of files was %s"%(sra, len(fastqFiles))
+                details['problem'].append(comment)
+                LOG.write(comment+"\n")
+                subprocess.run("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
+                item = sra+".fastq"
+        if not item:
+                comment = "for %s no fastq file found"%sra
+                details['problem'].append(comment)
+                LOG.write(comment+"\n")
+            continue # failed on that sra
+    
+    if runinfo["Platform"] == "ILLUMINA":
+        platform = "illumina"
+        registeredName = registerReads(details, item, platform=platform)
         if not args.illumina:
             args.illumina = []
-        listToAddTo = args.illumina
-    elif runinfo['Platform'] == "ION_TORRENT":
+        args.illumina.append(registeredName)
+        comment = "interpreting %s as type 'illumina'"%item
+    elif runinfo["Platform"] == "IONTORRENT":
+        platform = "iontorrent"
+        registeredName = registerReads(details, item, platform=platform)
         if not args.iontorrent:
             args.iontorrent = []
-        listToAddTo = args.iontorrent
-    elif runinfo['Platform'] == "OXFORD_NANOPORE":
-        programToUse = 'fastq-dump'
+        args.iontorrent.append(registeredName)
+        comment = "interpreting %s as type 'iontorrent'"%item
+    elif runinfo["Platform"] == "PACBIO":
+        platform = "pacbio"
+        registeredName = registerReads(details, item, platform=platform)
+        if not args.iontorrent:
+            args.pacbio = []
+        args.pacbio.append(registeredName)
+        comment = "interpreting %s as type 'pacbio'"%item
+    elif runinfo["Platform"] == "OXFORD_NANOPORE":
+        platform = "nanopore"
+        registeredName = registerReads(details, item, platform=platform)
         if not args.nanopore:
             args.nanopore = []
-        listToAddTo = args.nanopore
+        args.nanopore.append(registeredName)
+        comment = "interpreting %s as type 'nanopore'"%item
+
     else:
-        LOG.write("Problem: Cannot process sra data from platform %s\n"%runinfo['Platform'])
-        details.problems.add("for %s cannot process platform %s\n"%(sra, runinfo['Platform']))
-        return
+        comment = "for %s platform=%s, add to anonymous files to figure out"%(sra, runinfo['Platform'])
+        LOG.write(comment+"\n")
+        details.problems.add(comment)
+        if not args.anonymousReads:
+            args.anonymousReads = []
+        args.anonymousReads.extend(fastqFiles)
 
-    command = [programToUse, "-O", WorkDir, "--split-files", sraFull]
-    stime = time()
-    LOG.write("command = "+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("return_code = %d, time=%d seconds\n"%(return_code, time()-stime))
-    if return_code != 0:
-        LOG.write("Problem, %s return code was %d\n"%(programToUse, return_code))
-        LOG.write("Try one more time.\n")
-        return_code = subprocess.call(command, shell=False, stderr=LOG)
-        if return_code != 0:
-            LOG.write("Return code on second try was %d\n"%return_code)
-            LOG.write("Giving up on %s\n"%sra)
-            return
-
-    fastqFiles = glob.glob(os.path.join(WorkDir, sra+"*fastq"))
-    LOG.write("Number of fastq files from sra is %d\n"%len(fastqFiles))
-    if runinfo['LibraryLayout'].startswith("PAIRED"):
-        if len(fastqFiles) >= 2:
-            filePair = ":".join(sorted(fastqFiles))
-            listToAddTo.append(filePair)
-            studyPairedReads(filePair)
-        else:
-            comment = "for PAIRED library %s, number of files was %s, expected 2"%(sra, len(fastqFiles))
-            details['problem'].append(comment)
-            LOG.write(comment+"\n")
-            return
-    elif runinfo['LibraryLayout'].startswith("SINGLE"):
-        if len(fastqFiles) == 0:
-            comment = "for SINGLE library %s, number of files was %s"%(sra, len(fastqFiles))
-            details['problem'].append(comment)
-            LOG.write(comment+"\n")
-        elif len(fastqFiles) > 1:
-            LOG.write("Multiple fastq files from sra: %s\n"%(" ".join(fastqFiles)))
-            subprocess.run("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
-            fastqFiles = [sra+".fastq"]
-
-        listToAddTo.append(fastqFiles[0])
-        studyPairedReads(fastqFiles[0])
     return
 
 def organize_read_files(args, details):
@@ -1597,7 +1647,7 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--outputDirectory', '-d', default="p3_assembly")
     illumina_or_iontorrent = parser.add_mutually_exclusive_group()
-    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%%" between mate-pairs', required=False, default=[])
+    illumina_or_iontorrent.add_argument('--illumina', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or "%" between mate-pairs', required=False, default=[])
     illumina_or_iontorrent.add_argument('--iontorrent', nargs='*', help='list of IonTorrent[.gz] files or pairs, ":" between paired-end-files', required=False, default=[])
     parser.add_argument('--pacbio', nargs='*', help='list of Pacific Biosciences fastq[.gz] or bam files', required=False, default=[])
     parser.add_argument('--nanopore', nargs='*', help='list of Oxford Nanotech fastq[.gz] or bam files', required=False, default=[])
@@ -1611,7 +1661,8 @@ def main():
     parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default="", help='prefix for output files', required=False)
     parser.add_argument('--genome_size', default=Default_genome_size, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=1000, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_length', default=300, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_coverage', default=5, help='save contigs of this coverage or deeper', required=False)
     #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
@@ -1665,15 +1716,19 @@ def main():
     if args.illumina:
         replacementList=[]
         for item in args.illumina:
-            registeredName = registerReads(details, item, platform='illumina')
+            interleaved = args.interleaved and item in args.interleaved
+            platform='illumina'
+            registeredName = registerReads(details, item, platform=platform, interleaved=interleaved)
             replacementList.append(registeredName)
         LOG.write("After registering illumina reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.illumina), " ".join(replacementList)))
         args.illumina = replacementList
 
     if args.iontorrent:
+        platform='iontorrent'
         replacementList=[]
         for item in args.iontorrent:
-            registeredName = registerReads(details, item, platform='iontorrent')
+            interleaved = args.interleaved and item in args.interleaved
+            registeredName = registerReads(details, item, platform=platform, interleaved=interleaved)
             replacementList.append(registeredName)
         LOG.write("After registering iontorrent reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.iontorrent), " ".join(replacementList)))
         args.iontorrent = replacementList
@@ -1685,6 +1740,7 @@ def main():
             replacementList.append(registeredName)
         LOG.write("After registering pacbio reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.pacbio), " ".join(replacementList)))
         args.pacbio = replacementList
+
     if args.nanopore:
         replacementList=[]
         for item in args.nanopore:
@@ -1693,17 +1749,11 @@ def main():
         LOG.write("After registering nanopore reads:\nreplacing %s\nwith %s\n\n"%(" ".join(args.nanopore), " ".join(replacementList)))
         args.nanopore = replacementList
 
-    if args.anonymous_reads:
-        for item in args.anonymous_reads:
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'unspecified'
-            categorize_anonymous_read_files(item, details)
-
     if args.sra:
-        for item in args.sra:
-            details['reads'][item] = {}
-            details['reads'][item]['stated_platform'] = 'unspecified'
-            fetch_sra_file(item, details)
+        fetch_sra_files(args, details)
+
+    if args.anonymous_reads:
+        categorize_anonymous_read_files(args, details)
 
     if args.trim_galore:
         trimGalore(args, details)
