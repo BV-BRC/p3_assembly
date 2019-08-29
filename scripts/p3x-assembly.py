@@ -50,13 +50,13 @@ def registerReads(details, reads, platform=None, interleaved=False):
     if "reads" not in details:
         details["reads"] = {}
     if 'original_items' not in details:
-        details['original_items'] = set()
+        details['original_items'] = []
     if reads in details["original_items"]:
         comment = "dulicate registration of reads %s"%reads
         LOG.write(comment+"\n")
         details["problem"].append(comment)
         return None
-    details['original_items'].add(reads)
+    details['original_items'].append(reads)
     
     readStruct = {}
     readStruct["file"] = []
@@ -78,8 +78,8 @@ def registerReads(details, reads, platform=None, interleaved=False):
             return None
         file1 = os.path.split(read1)[1]
         file2 = os.path.split(read2)[1]
-        os.symlink(read1, os.path.join(WorkDir, file1))
-        os.symlink(read2, os.path.join(WorkDir, file2))
+        os.symlink(os.path.abspath(read1), os.path.join(WorkDir, file1))
+        os.symlink(os.path.abspath(read2), os.path.join(WorkDir, file2))
         readStruct["file"].append(file1)
         readStruct["file"].append(file2)
         readStruct["path"].append(read1)
@@ -96,7 +96,7 @@ def registerReads(details, reads, platform=None, interleaved=False):
         if interleaved:
             readStruct["interleaved"] = True
         file1 = os.path.split(reads)[1]
-        os.symlink(reads, os.path.join(WorkDir, file1))
+        os.symlink(os.path.abspath(reads), os.path.join(WorkDir, file1))
         readStruct["file"].append(file1)
         readStruct["path"].append(reads)
         registeredName = file1
@@ -972,7 +972,7 @@ def runUnicycler(args, details):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     unicyclerStartTime = time()
 
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    return_code = subprocess.call(command, shell=False, stdout=LOG)
     LOG.write("return code = %d\n"%return_code)
 
     unicyclerEndTime = time()
@@ -1380,7 +1380,7 @@ usage: canu [-version] [-citation] \
     LOG.write("canu command =\n"+" ".join(command)+"\n")
 
     canuStartTime = time()
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    return_code = subprocess.call(command, shell=False, stdout=LOG)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
@@ -1506,18 +1506,15 @@ def main():
     if args.params_json:
         parseJsonParameters(args)
     baseName = "p3_assembly" 
-    global WorkDir
-    global SaveDir
-    WorkDir = mkdtemp(dir=".", prefix=baseName+"_"+args.recipe+"_", suffix="_work")
     if len(args.prefix) > 0 and not args.prefix.endswith("_"):
         args.prefix += "_"
-    if not os.path.exists(WorkDir):
-        os.mkdir(WorkDir)
-    if args.outputDirectory:
-        SaveDir = os.path.basename(args.outputDirectory)
-    else:
-        SaveDir = baseName+"_save"
-    SaveDir = os.path.join(WorkDir, SaveDir)
+    global WorkDir
+    WorkDir = baseName+"_work"
+    if os.path.exists(WorkDir):
+        shutil.rmtree(WorkDir)
+    os.mkdir(WorkDir)
+    global SaveDir
+    SaveDir = os.path.abspath(os.path.join(WorkDir, baseName+"_save"))
     if os.path.exists(SaveDir):
         shutil.rmtree(SaveDir)
     os.mkdir(SaveDir)
@@ -1534,7 +1531,7 @@ def main():
     details = { 'logfile' : logfileName }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
-    details["original_items"] = set()
+    details["original_items"] = []
     details["reads"] = {}
     details["problem"] = []
     details["platform"] = {}
