@@ -260,6 +260,8 @@ def studySingleReads(item, details):
         if 'fasta' not in details['platform']:
             details['platform']['fasta'] = []
         details['platform']['fasta'].append(item)
+        details['reads'][item]['length_class'] = 'long'
+        details['reads'][item]['platform'] = 'fasta'
         studyFastaReads(F1, item, details)
         F.close()
         return
@@ -596,14 +598,14 @@ def categorize_anonymous_read_files(args, details):
 
     return
 
-def get_runinfo(run_accession, log=None):
+def get_sra_runinfo(run_accession, log=None):
     """ take sra run accession (like SRR123456)
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
     Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
     If efetch doesn't work, try scraping the web page.
     """
-    LOG.write("get_runinfo(%s)\n"%run_accession)
+    LOG.write("get_sra_runinfo(%s)\n"%run_accession)
     if run_accession.endswith(".sra"):
         run_accession = run_accession[:-4]
     runinfo = None
@@ -616,44 +618,50 @@ def get_runinfo(run_accession, log=None):
             if line.startswith(run_accession):
                 values = line.split(",")
                 runinfo = dict(zip(keys, values))
-        if not runinfo:
-            return None
+    if runinfo:
         if runinfo['Platform'] not in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
             # rescue case of mis-alignment between keys and values
             if log:
-                log.write("problem in get_runinfo: sra.cgi returned:\n"+text+"\n")
+                log.write("problem in get_sra_runinfo: sra.cgi returned:\n"+text+"\n")
             for val in values:
                 if val in ('ILLUMINA', 'PACBIO_SMRT', 'OXFORD_NANOPORE', 'ION_TORRENT'):
                     runinfo['Platform'] = val
                     break
-        if runinfo['LibraryLayout'] not in ('PAIRED', 'SINGLE'):        
+        if not runinfo['LibraryLayout'].startswith(('PAIRED', 'SINGLE')):        
             if log:
                 log.write("Need to search for LibraryLayout: bad value: %s\n"%runinfo['LibraryLayout'])
             for val in values:
-                if val in ('PAIRED', 'SINGLE'):
+                if val.startswith(('PAIRED', 'SINGLE')):
                     runinfo['LibraryLayout'] = val
                     break
 
     if not runinfo:
         if log:
             log.write("Problem, normal runinfo request failed. Trying alternative from web page.\n")
+        # screen-scrape
         runinfo_url = "https://trace.ncbi.nlm.nih.gov/Traces/sra/?run="+run_accession
         text = urllib2.urlopen(runinfo_url).read()
+        runinfo = {}
         if re.search("<td>Illumina", text, re.IGNORECASE):
-            runinfo = {'Platform': 'ILLUMINA'}
+            runinfo['Platform'] = 'ILLUMINA'
         elif re.search("<td>PacBio", text, re.IGNORECASE):
-            runinfo = {'Platform': 'PACBIO_SMRT'}
+            runinfo['Platform'] = 'PACBIO_SMRT'
         elif re.search("<td>Oxford", text, re.IGNORECASE):
-            runinfo = {'Platform': 'OXFORD_NANOPORE'}
+            runinfo['Platform'] = 'OXFORD_NANOPORE'
         elif re.search("<td>Ion Torrent", text, re.IGNORECASE):
-            runinfo = {'Platform': 'ION_TORRENT'}
+            runinfo['Platform'] = 'ION_TORRENT'
+
+        if re.search("<td>SINGLE</td>", text, re.IGNORECASE):
+            runinfo['LibraryLayout'] = 'SINGLE'
+        elif re.search("<td>PAIRED", text, re.IGNORECASE):
+            runinfo['LibraryLayout'] = 'PAIRED'
     return runinfo
 
 def fetch_one_sra(sra, run_info=None, log=sys.stderr):
     """ requires run_info to know which program to use
     """
     if not run_info:
-        run_info = get_runinfo(sra, log)
+        run_info = get_sra_runinfo(sra, log)
     programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
     if run_info['Platform'].startswith("PACBIO") or run_info['Platform'].startswith("OXFORD_NANOPORE"):
         programToUse = 'fastq-dump'
@@ -682,7 +690,7 @@ def fetch_sra_files(sra_ids, details):
     for sra in sra_ids:
         sraFull = sra
         sra = sraFull.replace(".sra", "")
-        runinfo = get_runinfo(sra)
+        runinfo = get_sra_runinfo(sra)
         if not runinfo:
             LOG.write("runinfo for %s was empty, giving up\n"%sra)
             continue
@@ -718,7 +726,7 @@ def fetch_sra_files(sra_ids, details):
             platform = "illumina"
         elif runinfo["Platform"] == "ION_TORRENT":
             platform = "iontorrent"
-        elif runinfo["Platform"] == "PACBIO":
+        elif runinfo["Platform"] == "PACBIO_SMRT":
             platform = "pacbio"
         elif runinfo["Platform"] == "OXFORD_NANOPORE":
             platform = "nanopore"
@@ -937,6 +945,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 
     # put all read files on command line, let Unicycler figure out which type each is
     for item in details['reads']:
+        if item in details['derived_reads']:
+            continue
         files = details['reads'][item]['file'] # array of tuples (path, filename)
         if len(files) > 1:
             command.extend(("-1", files[0], "-2", files[1]))
@@ -1322,12 +1332,19 @@ usage: canu [-version] [-citation] \
     """
     https://canu.readthedocs.io/en/latest/parameter-reference.html
     """
+    numLongReadFiles = 0
     if len(details['platform']['pacbio']):
         command.append("-pacbio-raw")
         command.extend(details['platform']['pacbio']) #allow multiple files
+        numLongReadFiles += len(details['platform']['pacbio'])
     if len(details['platform']['nanopore']):
         command.append("-nanopore-raw")
         command.extend(details['platform']['nanopore']) #allow multiple files
+        numLongReadFiles += len(details['platform']['nanopore'])
+    if not numLongReadFiles:
+        LOG.write("no long read files available for canu.\n")
+        details["problem"].append("no long read files available for canu")
+        return None
     LOG.write("canu command =\n"+" ".join(command)+"\n")
 
     canuStartTime = time()
@@ -1351,6 +1368,8 @@ usage: canu [-version] [-citation] \
                 }
 
     LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
+    if os.path.exists("canu.report"):
+        shutil.move("canu.report", os.path.join(SaveDir, prefix+"canu_report.txt"))
     
     if not os.path.exists("canu.contigs.fasta"):
         LOG.write("canu failed to generate contigs file.\n")
@@ -1393,10 +1412,13 @@ def write_html_report(htmlFile, details):
 
 
     HTML.write("<h3>Assembly</h3>\n")
-    HTML.write("<table class='a'>")
-    for key in sorted(details['assembly']):
-        HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
-    HTML.write("</table>\n")
+    if 'assembly' in details:
+        HTML.write("<table class='a'>")
+        for key in sorted(details['assembly']):
+            HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
+        HTML.write("</table>\n")
+    else:
+        HTML.write("<p>None</p>\n")
 
     if "quast_txt" in details:
         HTML.write("<h3>Quast Report</h3>\n")
@@ -1404,11 +1426,15 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
+        HTML.write("<pre>\n")
+        HTML.wirte(open(details["quast_txt"]).read())
+        HTML.write("\n</pre>\n")
     
-    HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
-    for line in details["post-assembly transformation"]:
-        HTML.write("<p>"+line+"<br>\n")
-    HTML.write("</div>\n")
+    if len(details["post-assembly transformation"]):
+        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
+        for line in details["post-assembly transformation"]:
+            HTML.write("<p>"+line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "Bandage plot" in details:
         path, imageFile = os.path.split(details["Bandage plot"])
@@ -1416,7 +1442,7 @@ def write_html_report(htmlFile, details):
         HTML.write("<div class='a'>")
         HTML.write("<img src='%s'>\n"%imageFile)
         HTML.write("</div>\n")
-
+    HTML.close()
 
 
 def main():
@@ -1488,7 +1514,8 @@ def main():
     details["original_items"] = []
     details["reads"] = {}
     details["problem"] = []
-    details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[]}
+    details["derived_reads"] = {}
+    details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
 
     if args.illumina:
         platform='illumina'
@@ -1516,11 +1543,14 @@ def main():
     if args.anonymous_reads:
         categorize_anonymous_read_files(args.anonymous_reads, details)
 
+    if len(details['platform']['anonymous']): #these may be here from sra items
+        categorize_anonymous_read_files(details['platform']['anonymous'], details)
+
     # move into working directory so that all files are local
     original_working_directory = os.getcwd()
     os.chdir(WorkDir)
 
-    if args.trim:
+    if args.trim and len(details['platform']['illumina'] + details['platform']['iontorrent']):
         trimGalore(details, threads=args.threads)
 
     if args.recipe == "auto":
