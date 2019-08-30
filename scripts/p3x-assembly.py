@@ -48,10 +48,6 @@ def registerReads(details, reads, platform=None, interleaved=False, supercede=No
     move read files to working directory to allow relative paths
     """
     LOG.write("registerReads( %s, platform=%s, interleaved=%s, supercede=%s\n"%(reads, str(platform), str(interleaved), str(supercede)))
-    if "reads" not in details:
-        details["reads"] = {}
-    if 'original_items' not in details:
-        details['original_items'] = []
     if reads in details["original_items"]:
         comment = "dulicate registration of reads %s"%reads
         LOG.write(comment+"\n")
@@ -109,6 +105,7 @@ def registerReads(details, reads, platform=None, interleaved=False, supercede=No
         registeredName = file1
 
     if supercede:
+        details['derived_reads'][supercede] = registeredName
         if supercede in details['reads']:
             platform = details['reads'][supercede]['platform']
             readStruct['platform'] = platform
@@ -658,12 +655,13 @@ def fetch_one_sra(sra, run_info=None, log=sys.stderr):
     if not run_info:
         run_info = get_runinfo(sra, log)
     programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
-    if runinfo['Platform'].startswith("PACBIO") or runinfo['Platform'].startsWith("OXFORD_NANOPORE"):
+    if run_info['Platform'].startswith("PACBIO") or run_info['Platform'].startswith("OXFORD_NANOPORE"):
         programToUse = 'fastq-dump'
+    stime = time()
     command = [programToUse, "--split-files", sra]
     log.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=log)
-    LOG.write("return_code = %d, time=%d seconds\n"%(return_code, time()-stime))
+    log.write("return_code = %d\n"%(return_code))
     if return_code != 0:
         log.write("Problem, %s return code was %d\n"%(programToUse, return_code))
 
@@ -672,6 +670,7 @@ def fetch_one_sra(sra, run_info=None, log=sys.stderr):
         log.write("Return code on second try was %d\n"%return_code)
         if return_code != 0:
             LOG.write("Giving up on %s\n"%sra)
+    LOG.write("fetch_one_sra time=%d seconds\n"%(time()-stime))
     return
 
 def fetch_sra_files(sra_ids, details):
@@ -689,7 +688,7 @@ def fetch_sra_files(sra_ids, details):
             continue
         LOG.write("Runinfo for %s reports platform = %s and LibraryLayout = %s\n"%(sra, runinfo["Platform"], runinfo['LibraryLayout']))
 
-        fetch_one_sra(sraFull, runinfo, LOG)
+        fetch_one_sra(sraFull, run_info=runinfo, log=LOG)
         fastqFiles = glob.glob(sra+"*fastq")
         LOG.write("Fastq files from sra: %s\n"%str(fastqFiles))
         item = None
@@ -704,20 +703,20 @@ def fetch_sra_files(sra_ids, details):
             if len(fastqFiles) == 1:
                 item = fastqFiles[0]
             if len(fastqFiles) > 1:
-                comment = "for library %s, number of files was %s"%(sra, len(fastqFiles))
+                subprocess.call("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
+                item = sra+".fastq"
+                comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
                 details['problem'].append(comment)
                 LOG.write(comment+"\n")
-                subprocess.run("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
-                item = sra+".fastq"
             if not item:
                 comment = "for %s no fastq file found"%sra
                 details['problem'].append(comment)
                 LOG.write(comment+"\n")
-            continue # failed on that sra
+                continue # failed on that sra
     
         if runinfo["Platform"] == "ILLUMINA":
             platform = "illumina"
-        elif runinfo["Platform"] == "IONTORRENT":
+        elif runinfo["Platform"] == "ION_TORRENT":
             platform = "iontorrent"
         elif runinfo["Platform"] == "PACBIO":
             platform = "pacbio"
@@ -1074,7 +1073,8 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
     command = ["minimap2", "-t", str(threads), "-d", contigIndex, contigFile] 
     tempTime = time() 
     LOG.write("minimap2 index command:\n"+' '.join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("minimap2 index return code = %d\n"%return_code)
     if return_code != 0:
         return None
@@ -1149,7 +1149,8 @@ def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     command = ["bowtie2-build", "--threads", str(threads),  contigFile, contigFile]
     LOG.write("executing:\n"+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout and stderr to dev/null
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("bowtie2-build return code = %d\n"%return_code)
     if return_code != 0:
         return None
@@ -1167,7 +1168,8 @@ def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
     samFile = contigFile+"_"+fastqBase+".sam"
     command.extend(('-S', samFile))
     LOG.write("executing:\n"+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("bowtie2 return code = %d\n"%return_code)
     if return_code != 0:
         return None
@@ -1215,7 +1217,8 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     command.extend(('--threads', str(threads)))
     tempTime = time()
     LOG.write("executing:\n"+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("pilon return code = %d\n"%return_code)
     LOG.write("pilon duration = %d\n"%(time() - tempTime))
     if return_code != 0:
@@ -1298,7 +1301,7 @@ def calcReadDepth(bamfiles):
     LOG.write("len(readDepth) = %d\n"%len(readDepth))
     return readDepth
 
-def runCanu(details, threads=1, genome_size="5m", memory=250):
+def runCanu(details, threads=1, genome_size="5m", memory=250, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     canuStartTime = time()
     LOG.write("runCanu: elapsed seconds = %d\n"%(canuStartTime-Start_time))
@@ -1319,16 +1322,17 @@ usage: canu [-version] [-citation] \
     """
     https://canu.readthedocs.io/en/latest/parameter-reference.html
     """
-    if 'pacbio' in details['platform']:
+    if len(details['platform']['pacbio']):
         command.append("-pacbio-raw")
         command.extend(details['platform']['pacbio']) #allow multiple files
-    if 'nanopore' in details['platform']:
+    if len(details['platform']['nanopore']):
         command.append("-nanopore-raw")
         command.extend(details['platform']['nanopore']) #allow multiple files
     LOG.write("canu command =\n"+" ".join(command)+"\n")
 
     canuStartTime = time()
-    return_code = subprocess.call(command, shell=False, stdout=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
@@ -1464,7 +1468,7 @@ def main():
     os.mkdir(WorkDir)
     WorkDir = os.path.abspath(WorkDir)
     global SaveDir
-    SaveDir = os.path.abspath(os.path.join(WorkDir, baseName+"_save"))
+    SaveDir = os.path.abspath(os.path.join(WorkDir, "save"))
     if os.path.exists(SaveDir):
         shutil.rmtree(SaveDir)
     os.mkdir(SaveDir)
@@ -1538,7 +1542,7 @@ def main():
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
     elif args.recipe == "canu":
-        contigs = runCanu(details, threads=args.threads, genome_size=args.genome_size, memory=args.memory)
+        contigs = runCanu(details, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
