@@ -223,9 +223,13 @@ def studyPairedReads(item, details):
             seqLen1 = len(line1)-1
             seqLen2 = len(line2)-1
         elif i % 4 == 3:
-            if seqQualLenMatch and (seqLen1 != len(line1)-1 or seqLen2 != len(line2)-1):
-                seqQualLenMatch = False
-                details['reads'][item]["problems"].append("sequence and quality strings differ in length at read %d"%readNumber)
+            if seqQualLenMatch:
+                if not (seqLen1 == len(line1)-1 and seqLen2 == len(line2)-1):
+                    readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
+                    seqQualLenMatch = False
+                    comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
+                    details['reads'][item]["problems"].append(comment)
+                    LOG.write(comment+"\n")
             totalReadLength += seqLen1 + seqLen2
             maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
             minReadLength = min(minReadLength, seqLen1, seqLen2)
@@ -311,7 +315,9 @@ def studySingleReads(item, details):
             qualLen = len(line)-1
             if seqQualLenMatch and (seqLen != qualLen):
                 seqQualLenMatch = False
-                details['reads'][item]["problems"].append("sequence and quality strings differ in length at read %d"%readNumber)
+                comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
+                details['reads'][item]["problems"].append(comment)
+                LOG.write(comment+"\n")
             totalReadLength += seqLen
             maxReadLength = max(maxReadLength, seqLen) 
             minReadLength = min(minReadLength, seqLen)
@@ -418,6 +424,7 @@ def trimGalore(details, threads=1):
     LOG.write("\ntrimGalore() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
     if "trim report" not in details:
         details["trim report"] = {}
+    toRegister = {} # save trimmed reads to register after iterating dictionary to avoid error "dictionary changed size during iteration"
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'short' and not details['reads'][reads]['platform'] == 'fasta':
             command = ['trim_galore', '-j', str(threads), '-o', '.']
@@ -428,26 +435,25 @@ def trimGalore(details, threads=1):
                 LOG.write("command: "+" ".join(command))
                 return_code = subprocess.call(command, shell=False, stderr=LOG)
                 LOG.write("return code = %d\n"%return_code)
-                trimReads1 = os.path.basename(splitReads[0])
-                trimReport1 = trimReads1+"_trimming_report.txt"
-                trimReads1 = re.sub(r"(.+)\..*", r"\1_val_1.fq", trimReads1)
-                trimReads2 = os.path.basename(splitReads[1])
-                trimReport2 = trimReads2+"_trimming_report.txt"
-                trimReads2 = re.sub(r"(.+)\..*", r"\1_val_2.fq", trimReads2)
-                comment = "trim_galore, input %s, output %s"%(reads, trimReads1+":"+trimReads2)
-                if os.path.exists(trimReads1) and os.path.exists(trimReads2):
-                    LOG.write(comment+"\n")
-                    details["pre-assembly transformation"].append(comment)
-                    
-                    trimmedReadPair = trimReads1+":"+trimReads2
-                    registerReads(trimmedReadPair, details, supercedes=reads)
+                readFileBase = re.sub(r"^(.*?)[.:%]", r"\1", reads)
+                trimReads = glob.glob(readFileBase+"*fq")
+                if not trimReads:
+                    continue
+                trimReads = sorted(trimReads)
+                comment = "trim_galore, input %s, output %s"%(reads, ":".join(trimReads))
+                LOG.write(comment+"\n")
+                details["pre-assembly transformation"].append(comment)
+                if len(trimReads) >= 2:
+                    trimmedReadPair = trimRead[0]+":"+trimRead[1]
+                    toRegister[trimmedReadPair] = reads
                     #details['platform'][platform][index] = trimmedReadPair
-                    if os.path.exists(trimReport1) and os.path.exists(trimReport2):
-                        shutil.move(trimReport1, os.path.join(SaveDir, trimReport1))
-                        shutil.move(trimReport2, os.path.join(SaveDir, trimReport2))
-                        details["trim report"][reads]=[trimReport1, trimReport2]
+                    trimReports = sorted(glob(readFileBase+"*trimming_report.txt"))
+                    for f in trimReports:
+                        shutil.move(trimReport[0], os.path.join(SaveDir, trimReport[0]))
+                        shutil.move(trimReport[1], os.path.join(SaveDir, trimReport[1]))
+                        details["trim report"][reads]=[trimReport[0], trimReport[1]]
                 else:
-                    comment = "Problem during trim_galore: expected files not found: "+trimReads1 +", "+trimReads2
+                    comment = "Problem during trim_galore: expected files not found"
                     details["problem"].append(comment)
                     LOG.write(comment)
             else:
@@ -460,7 +466,7 @@ def trimGalore(details, threads=1):
                 trimReads = re.sub(r"(.*)\..*", r"\1_trimmed.fq", trimReads)
                 comment = "trim_galore, input %s, output %s"%(reads, trimReads)
                 if os.path.exists(trimReads):
-                    registerReads(trimReads, details, supercedes=reads)
+                    toRegister[trimReads] = reads
                     LOG.write(comment+"\n")
                     details["pre-assembly transformation"].append(comment)
                     if os.path.exists(trimReport):
@@ -470,6 +476,9 @@ def trimGalore(details, threads=1):
                     comment = "Problem during trim_galore: expected files not found: "+trimReads
                     LOG.write(comment)
                     details["problem"].append(comment)
+    for trimReads in toRegister:
+        registerReads(trimReads, details, supercedes=toRegister[trimReads])
+
     LOG.write("trim_galore trimming completed, duration = %d seconds\n\n\n"%(time()-startTrimTime))
 
 def sampleReads(filename, details=None):
@@ -891,16 +900,21 @@ def runQuast(contigsFile, args, details):
     shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SaveDir, args.prefix+"quast_report.html"))
     shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SaveDir, args.prefix+"quast_report.txt"))
     #shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(SaveDir, "icarus_viewers"))
-    details["quast_txt"] = "quast_report.txt"
-    details["quast_html"] = "quast_report.html"
+    details["quast_txt"] = args.prefix+"quast_report.txt"
+    details["quast_html"] = args.prefix+"quast_report.html"
 
-def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDepth=None, longReadDepth=None):
+def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, longReadDepth=None):
     """ 
     Write only sequences at or above min_length to output file.
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
-    LOG.write("filterContigsByMinLength(%s, %s, %d) elapsed seconds = %f\n"%(inputFile, outputFile, args.min_contig_length, time()-Start_time))
+    LOG.write("filterContigsByMinLength(%s) \n"%(inputFile))
+    if not shortReadDepth and not longReadDepth:
+        LOG.write("Neither shortReadDepth nor longReadDepth provided. Quiting.\n")
+        return None
     suboptimalReads = ""
+    outputFile = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputFile)
+    LOG.write("writing filtered contigs to %s\n"%outputFile)
     with open(inputFile) as IN:
         with open(outputFile, 'w') as OUT:
             shortCovTags = ['coverage', 'normalized_cov']
@@ -960,9 +974,13 @@ def filterContigsByMinLength(inputFile, outputFile, args, details, shortReadDept
         suboptimalReadsFile = re.sub("\..*", "_short_or_low_coverage.fasta", outputFile)
         with open(suboptimalReadsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalReads)
+    if os.path.getsize(outputFile) < 10:
+        LOG.write("failed to generate outputFile, return None\n")
+        return None
     comment = "trimContigsByMinLength, input %s, output %s"%(inputFile, outputFile)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
+    return outputFile
 
 def runBandage(gfaFile, details):
     imageFormat = ".jpg"
@@ -994,18 +1012,30 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     command.append("--no_pilon")
 
     # put all read files on command line, let Unicycler figure out which type each is
+    # apparently unicycler can only accept one read set in each class (I tried multiple ways to submit 2 paired-end sets, failed)
+    short1 = None
+    short2 = None
+    unpaired = None
+    long_reads = None
     for item in details['reads']:
         if 'superceded_by' in details['reads'][item]:
             continue
         files = details['reads'][item]['file'] # array of tuples (path, filename)
-        if len(files) > 1:
-            command.extend(("-1", files[0], "-2", files[1]))
-        else:
-            if details['reads'][item]['length_class'] == 'short':
-                size_tag = '-s'
+        if details['reads'][item]['length_class'] == 'short':
+            if len(files) > 1:
+                short1 = files[0]
+                short2 = files[1]
             else:
-                size_tag = '-l'
-            command.extend((size_tag, files[0]))
+                unpaired = files[0]
+        else:
+            long_reads = files[0]
+
+    if short1:
+        command.extend(("--short1", short1, "--short2", short2))
+    if unpaired:
+        command.extend(("--unpaired", " ".join(unpaired)))
+    if long_reads:
+        comand.extend(("--long", long_reads))
     # it is not quite right to send iontorrent data to spades through unicycler because the --iontorrent flag to spades will not be set
 
     LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
@@ -1028,7 +1058,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     details["assembly"] = { 
                 'assembly_elapsed_time' : elapsedHumanReadable,
                 'assembler': 'unicycler',
-                'command_line': command,
+                'command_line': " ".join(command)
                 }
 
     LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
@@ -1093,7 +1123,7 @@ def runSpades(args, details):
     spadesStartTime = time()
 
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-        return_code = subprocess.call(command, shell=False, stdout=FNULL)
+        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
 
     spadesEndTime = time()
@@ -1109,7 +1139,7 @@ def runSpades(args, details):
     details["assembly"] = { 
                 'assembly_elapsed_time' : elapsedHumanReadable,
                 'assembler': 'spades',
-                'command_line': command,
+                'command_line': " ".join(command)
                 }
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
@@ -1132,30 +1162,31 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
     """
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
     """
+    LOG.write("runMinimap(%s, %s, details, %d, %s)\n"%(contigFile, longReadFastq, threads, outformat))
     # index contig sequences
     contigIndex = contigFile.replace(".fasta", ".mmi")
     command = ["minimap2", "-t", str(threads), "-d", contigIndex, contigFile] 
     tempTime = time() 
     LOG.write("minimap2 index command:\n"+' '.join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
-    LOG.write("minimap2 index return code = %d\n"%return_code)
+    LOG.write("minimap2 index return code = %d, time = %d seconds\n"%(return_code, time() - tempTime))
     if return_code != 0:
         return None
-    LOG.write('minimap2_index_time = %d seconds\n'%(time() - tempTime))
 
     # map long reads to contigs
     contigSam = contigFile.replace(".fasta", ".sam")
     command = ["minimap2", "-t", str(threads), "-a", "-o", contigSam, contigFile, longReadFastq]
     tempTime = time()
     LOG.write("minimap2 map command:\n"+' '.join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("minimap2 map return code = %d\n"%return_code)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
+        return_code = subprocess.call(command, shell=False, stderr=FNULL)
+    LOG.write("minimap2 map return code = %d, time = %d seconds\n"%(return_code, time() - tempTime))
     if return_code != 0:
         return None
-    LOG.write('minimap2_map_time = %d seconds\n'%(time() - tempTime))
 
     if outformat == 'sam':
+        LOG.write('runMinimap returning %s\n'%contigSam)
         return contigSam
 
     #otherwise format as bam (and index)
@@ -1167,7 +1198,7 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
     command = "samtools view -bS -@ %d %s | samtools sort -@ %d - -o %s"%(sortThreads, contigSam, sortThreads, bamFile)
     LOG.write("executing:\n"+command+"\n")
     return_code = subprocess.call(command, shell=True, stderr=LOG)
-    LOG.write("samtools return code = %d, time=%d\n"%(return_code, time()-tempTime))
+    LOG.write("samtools view|sort return code = %d, time=%d\n"%(return_code, time()-tempTime))
     os.remove(contigSam) #save a little space
     if return_code != 0:
         return None
@@ -1175,7 +1206,8 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
     command = ["samtools", "index", bamFile]
     LOG.write("executing:\n"+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("samtools return code = %d\n"%return_code)
+    LOG.write("samtools index return code = %d\n"%return_code)
+    LOG.write('runMinimap returning %s\n'%bamFile)
     return bamFile
 
 def runRacon(contigFile, longReadsFastq, details, threads=1):
@@ -1185,19 +1217,19 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     Return name of polished contigs.
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-Start_time))
-    readsToContigsSam = runMinimap(contigFile, longReadsFastq, threads, details, outformat='sam')
+    LOG.write('runRacon(%s, %s, details, %d)\n'%(contigFile, longReadsFastq, threads))
+    readsToContigsSam = runMinimap(contigFile, longReadsFastq, details, threads, outformat='sam')
     raconStartTime = time()
     raconContigs = contigFile.replace(".fasta", ".racon.fasta")
     raconOut = open(raconContigs, 'w')
     command = ["racon", "-t", str(threads), "-u", longReadsFastq, readsToContigsSam, contigFile]
     tempTime = time()
     LOG.write("racon command: \n"+' '.join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG, stdout=raconOut)
-    LOG.write("racon return code = %d\n"%return_code)
-    LOG.write("Racon total time = %d seconds\n"%(time()-raconStartTime))
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
+        return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
+    LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
     if return_code != 0:
         return None
-    LOG.write('racon time = %d seconds\n'%(time()-tempTime))
     raconContigSize = os.path.getsize(raconContigs)
     if raconContigSize < 10:
         return None
@@ -1301,6 +1333,7 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
 
 def calcReadDepth(bamfiles):
     """ Return dict of contig_ids to tuple of (coverage, normalized_coverage) """
+    LOG.write("calcReadDepth(%s)\n"%" ".join(bamfiles))
     readDepth = {}
     command = ["samtools", "depth", "-a"]
     if type(bamfiles) is str:
@@ -1429,7 +1462,7 @@ usage: canu [-version] [-citation] \
     details["assembly"] = { 
                 'assembly_elapsed_time' : elapsedHumanReadable,
                 'assembler': 'canu',
-                'command_line': command,
+                'command_line': " ".join(command)
                 }
 
     LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
@@ -1459,10 +1492,15 @@ def write_html_report(htmlFile, details):
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
         for key in sorted(details['reads'][item]):
-            if key in ('problems'):
+            if key == 'problems':
                 continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
+        if "problems" in details['reads'][item] and len(details['reads'][item]['problems']):
+            HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
+            for prob in details['reads'][item]['problems']:
+                HTML.write("<li>"+prob+"\n")
+            HTML.write("</ul></div>\n")
     
     if len(details["pre-assembly transformation"]):
         HTML.write("<h3>Pre-Assembly Transformations</h3>\n<div class='a'>\n")
@@ -1475,7 +1513,10 @@ def write_html_report(htmlFile, details):
         for reads in details["trim report"]:
             HTML.write("<b>"+reads+"</b><ul>")
             for report in details["trim report"][reads]:
-                HTML.write("<li><a href='%s'>%s</a>\n"%(report, report))
+                if os.path.exists(os.path.join(SaveDir, report)):
+                    HTML.write("<pre>\n")
+                    HTML.write(open(os.path.join(SaveDir, report)).read())
+                    HTML.write("\n</pre>\n")
         HTML.write("</div>\n")
 
     if len(details['derived_reads']):
@@ -1487,6 +1528,11 @@ def write_html_report(htmlFile, details):
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
+            if "problems" in details['reads'][item] and len(details['reads'][item]['problems']):
+                HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
+                for prob in details['reads'][item]['problems']:
+                    HTML.write("<li>"+prob+"\n")
+                HTML.write("</ul></div>\n")
 
     HTML.write("<h3>Assembly</h3>\n")
     if 'assembly' in details:
@@ -1503,9 +1549,10 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
-        HTML.write("<pre>\n")
-        HTML.write(open(os.path.join(SaveDir, details["quast_txt"])).read())
-        HTML.write("\n</pre>\n")
+        if os.path.exists(os.path.join(SaveDir, details["quast_txt"])):
+            HTML.write("<pre>\n")
+            HTML.write(open(os.path.join(SaveDir, details["quast_txt"])).read())
+            HTML.write("\n</pre>\n")
     
     if len(details["post-assembly transformation"]):
         HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
@@ -1575,7 +1622,7 @@ def main():
     if os.path.exists(SaveDir):
         shutil.rmtree(SaveDir)
     os.mkdir(SaveDir)
-    logfileName = os.path.join(SaveDir, baseName + ".log")
+    logfileName = os.path.join(SaveDir, args.prefix + "p3_assembly.log")
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
@@ -1682,35 +1729,42 @@ def main():
     if contigs and os.path.getsize(contigs):
         shortReadDepth={}
         longReadDepth={}
-        if len(details['platform']['illumina'] + details['platform']['iontorrent']):
-            bamFiles=[]
-            for shortReadFastq in details['platform']['illumina'] + details['platform']['iontorrent']:
-                bam = runBowtie(contigs, shortReadFastq, details, threads=args.threads, outformat='bam')
+        bamFiles=[]
+        for reads in details['reads']:
+            if details['reads'][reads]['length_class'] == 'short':
+                bam = runBowtie(contigs, reads, details, threads=args.threads, outformat='bam')
                 if bam:
                     bamFiles.append(bam)
+        if len(bamFiles):
             shortReadDepth = calcReadDepth(bamFiles)
-        if len(details['platform']['pacbio'] + details['platform']['nanopore']):
-            bamFiles=[]
-            for longReadFastq in details['platform']['illumina'] + details['platform']['iontorrent']:
-                bam = runMinimap(contigs, longReadFastq, details, threads=args.threads, outformat='bam')
+        bamFiles=[]
+        for reads in details['reads']:
+            if details['reads'][reads]['length_class'] == 'long':
+                bam = runMinimap(contigs, reads, details, threads=args.threads, outformat='bam')
                 if bam:
                     bamFiles.append(bam)
+        if len(bamFiles):
             longReadDepth = calcReadDepth(bamFiles)
         saveContigsFile = os.path.join(SaveDir, args.prefix+"contigs.fasta")
-        filterContigsByMinLength(contigs, saveContigsFile, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
-        if os.path.getsize(saveContigsFile):
-            runQuast(saveContigsFile, args, details)
-        gfaFile = os.path.join(SaveDir, args.prefix+"assembly_graph.gfa")
-        if os.path.exists(gfaFile):
-            bandagePlot = runBandage(gfaFile, details)
-            details["Bandage plot"] = bandagePlot
+        filteredContigs = filterContigsByMinLength(contigs, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
+        if filteredContigs:
+            contigs = filteredContigs
+    if contigs and os.path.getsize(contigs):
+        runQuast(contigs, args, details)
+        shutil.move(contigs, os.path.join(SaveDir, args.prefix+"contigs.fasta"))
+
+    gfaFile = os.path.join(SaveDir, args.prefix+"assembly_graph.gfa")
+    if os.path.exists(gfaFile):
+        bandagePlot = runBandage(gfaFile, details)
+        details["Bandage plot"] = bandagePlot
+
     htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - Start_time)/3600))
     LOG.close()
-    fp = file(os.path.join(SaveDir, baseName+".run_details"), "w")
+    fp = file(os.path.join(SaveDir, args.prefix+"_run_details.txt"), "w")
     json.dump(details, fp, indent=2, sort_keys=True)
     fp.close()
 
