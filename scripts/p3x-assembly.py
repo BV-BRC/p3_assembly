@@ -432,50 +432,55 @@ def trimGalore(details, threads=1):
                 splitReads = reads.split(":")
                 #-j 4 -o testTrim --length 30 --paired SRR1395326_1_10pct.fastq SRR1395326_2_10pct.fastq
                 command.extend(["--paired", splitReads[0], splitReads[1]])
-                LOG.write("command: "+" ".join(command))
-                return_code = subprocess.call(command, shell=False, stderr=LOG)
+                LOG.write("command: "+" ".join(command)+"\n")
+                proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+                trimGaloreStderr = proc.stderr.read()
+                return_code = proc.wait()
                 LOG.write("return code = %d\n"%return_code)
-                readFileBase = re.sub(r"^(.*?)[.:%]", r"\1", reads)
-                trimReads = glob.glob(readFileBase+"*fq")
-                if not trimReads:
+                trimReads = re.findall(r"Writing validated paired-end read \d reads to (\S+)", trimGaloreStderr)
+                LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
+                if not trimReads or len(trimReads) < 2:
+                    comment = "trim_galore did not name trimmed reads output files in stderr"
+                    LOG.write(comment+"\n")
+                    details['reads'][reads]['problem'].append(comment)
                     continue
-                trimReads = sorted(trimReads)
                 comment = "trim_galore, input %s, output %s"%(reads, ":".join(trimReads))
                 LOG.write(comment+"\n")
                 details["pre-assembly transformation"].append(comment)
-                if len(trimReads) >= 2:
-                    trimmedReadPair = trimRead[0]+":"+trimRead[1]
-                    toRegister[trimmedReadPair] = reads
-                    #details['platform'][platform][index] = trimmedReadPair
-                    trimReports = sorted(glob(readFileBase+"*trimming_report.txt"))
-                    for f in trimReports:
-                        shutil.move(trimReport[0], os.path.join(SaveDir, trimReport[0]))
-                        shutil.move(trimReport[1], os.path.join(SaveDir, trimReport[1]))
-                        details["trim report"][reads]=[trimReport[0], trimReport[1]]
-                else:
-                    comment = "Problem during trim_galore: expected files not found"
-                    details["problem"].append(comment)
-                    LOG.write(comment)
+                toRegister[":".join(trimReads)] = reads
+
+                trimReports = re.findall(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
+                LOG.write("re.findall for trim reports returned %s\n"%str(trimReports))
+                details["trim report"][reads]=[]
+                for f in trimReports:
+                    shutil.move(f, os.path.join(SaveDir, os.path.basename(f)))
+                    details["trim report"][reads].append(f)
             else:
                 command.append(reads)
                 LOG.write("command: "+" ".join(command))
-                return_code = subprocess.call(command, shell=False, stderr=LOG)
+                proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+                trimGaloreStderr = proc.stderr.read()
+                return_code = proc.wait()
                 LOG.write("return code = %d\n"%return_code)
-                trimReads = reads
-                trimReport = trimReads+"_trimming_report.txt"
-                trimReads = re.sub(r"(.*)\..*", r"\1_trimmed.fq", trimReads)
-                comment = "trim_galore, input %s, output %s"%(reads, trimReads)
-                if os.path.exists(trimReads):
-                    toRegister[trimReads] = reads
+                trimReads = re.findall(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
+                LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
+                if not trimReads:
+                    comment = "trim_galore did not name trimmed reads output files in stderr"
                     LOG.write(comment+"\n")
-                    details["pre-assembly transformation"].append(comment)
-                    if os.path.exists(trimReport):
-                        shutil.move(trimReport, os.path.join(SaveDir, trimReport))
-                        details["trim report"][reads]=[trimReport]
-                else:
-                    comment = "Problem during trim_galore: expected files not found: "+trimReads
-                    LOG.write(comment)
-                    details["problem"].append(comment)
+                    details['reads'][reads]['problem'].append(comment)
+                    continue
+                trimReads = trimReads.group(1)
+                comment = "trim_galore, input %s, output %s"%(reads, trimReads)
+                LOG.write(comment+"\n")
+                details["pre-assembly transformation"].append(comment)
+                toRegister[trimReads] = reads
+
+                trimReport = re.search(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
+                LOG.write("regex for trim report returned %s\n"%str(trimReport))
+                if trimReport:
+                    trimReport = trimReport.group(1)
+                    details["trim report"][reads]=trimReport
+                    shutil.move(trimReport, os.path.join(SaveDir, os.path.basename(trimReport)))
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -1764,7 +1769,7 @@ def main():
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - Start_time)/3600))
     LOG.close()
-    fp = file(os.path.join(SaveDir, args.prefix+"_run_details.txt"), "w")
+    fp = file(os.path.join(SaveDir, args.prefix+"run_details.txt"), "w")
     json.dump(details, fp, indent=2, sort_keys=True)
     fp.close()
 
