@@ -326,6 +326,10 @@ def studySingleReads(item, details):
             readNumber += 1
         i += 1
                 
+    if not readNumber:
+        comment = "no reads found in %s\n"%item
+        LOG.write(comment+"\n")
+        return
     avgReadLength = totalReadLength/readNumber
     details['reads'][item]['avg_len'] = avgReadLength
     details['reads'][item]['max_read_len'] = maxReadLength
@@ -462,7 +466,7 @@ def trimGalore(details, threads=1):
                 trimGaloreStderr = proc.stderr.read()
                 return_code = proc.wait()
                 LOG.write("return code = %d\n"%return_code)
-                trimReads = re.findall(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
+                trimReads = re.search(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
                 LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
                 if not trimReads:
                     comment = "trim_galore did not name trimmed reads output files in stderr"
