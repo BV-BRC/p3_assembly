@@ -113,7 +113,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             try: # swap item in platform[] with this new version
                 index = details['platform'][platform].index(supercedes)
                 details['platform'][platform][index] = registeredName
-            except ValueError as ve:
+            except ValueError:
                 comment = "Problem: superceded name %s not found in details_%s"%(registeredName, platform)
     else:
         if platform:
@@ -272,7 +272,6 @@ def studySingleReads(item, details):
         studyFastaReads(item, details)
         return
 
-    seqLen1 = 0
     totalReadLength = 0
     seqQualLenMatch = True
     maxReadLength = 0
@@ -341,7 +340,6 @@ def studyFastaReads(item, details):
     maxReadLength = 0
     minReadLength = 1e6
     readNumber = 0
-    i = 0
     F = open(item)
     for line in F:
         if line.startswith(">"):
@@ -790,7 +788,6 @@ def writeSpadesYamlFile(details):
     paired_end_reads = [[], []]
     mate_pair_reads = [[], []]
     interleaved_reads = []
-    all_read_files = []
 
     shortReadItems = []
     if 'illumina' in details['platform']:
@@ -924,7 +921,6 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
             seq = ""
             contigIndex = 1
             contigCoverage = 0
-            contigInfo = ""
             for line in IN:
                 m = re.match(r">(\S+)", line)
                 if m:
@@ -972,7 +968,7 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
                 else:
                     suboptimalReads += contigId+"\n"+seq+"\n"
     if suboptimalReads:
-        suboptimalReadsFile = re.sub("\..*", "_short_or_low_coverage.fasta", outputFile)
+        suboptimalReadsFile = re.sub(r"\..*", "_short_or_low_coverage.fasta", outputFile)
         with open(suboptimalReadsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalReads)
     if os.path.getsize(outputFile) < 10:
@@ -1249,6 +1245,7 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
     LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
+    LOG.write("racon return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
         return None
     raconContigSize = os.path.getsize(raconContigs)
@@ -1332,8 +1329,7 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     pilonContigs = pilonPrefix+".fasta"
     numChanges = 0
     with open(pilonContigs.replace(".fasta", ".changes")) as CHANGES:
-        for line in CHANGES:
-            numChanges += 1
+        numChanges = len(CHANGES.read().splitlines())
     LOG.write("Number of changes made by pilon was %d\n"%numChanges)
 
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, numChanges)
@@ -1434,7 +1430,6 @@ usage: canu [-version] [-citation] \
     """
     https://canu.readthedocs.io/en/latest/parameter-reference.html
     """
-    numLongReadFiles = 0
     pacbio_reads = []
     for item in details['reads']:
         if details['reads'][item]['platform'] in ('pacbio', 'fasta'):
@@ -1762,7 +1757,6 @@ def main():
                     bamFiles.append(bam)
         if bamFiles:
             longReadDepth = calcReadDepth(bamFiles)
-        saveContigsFile = os.path.join(SAVE_DIR, args.prefix+"contigs.fasta")
         filteredContigs = filterContigsByMinLength(contigs, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
         if filteredContigs:
             contigs = filteredContigs
