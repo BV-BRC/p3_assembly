@@ -260,7 +260,13 @@ def studyPairedReads(item, details):
 
 def studySingleReads(item, details):
     func_start = time()
-    LOG.write("studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-Start_time))
+
+    if not os.path.isfile(item):
+        LOG.write("studySingleReads(): %s is not a file. cwd=%s\n" % (item, os.getcwd()))
+        return
+
+    LOG.write("studySingleReads(%s) time = %s, total elapsed = %d seconds\n" %
+              (item, strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-Start_time))
     if "reads" not in details:
         details["reads"] = {}
     if item not in details['reads']:
@@ -1665,6 +1671,13 @@ def main():
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
 
+    # move into working directory so that all files are local
+    original_working_directory = os.getcwd()
+    os.chdir(WorkDir)
+    LOG.write("chdir to %s\n" % (WorkDir))
+    LOG.write("cwd=%s\n" % (os.getcwd()))
+    
+
     if args.illumina:
         platform='illumina'
         for item in args.illumina:
@@ -1690,10 +1703,6 @@ def main():
 
     if args.anonymous_reads:
         categorize_anonymous_read_files(args, details)
-
-    # move into working directory so that all files are local
-    original_working_directory = os.getcwd()
-    os.chdir(WorkDir)
 
     if args.trim and len(details['platform']['illumina'] + details['platform']['iontorrent']):
         trimGalore(details, threads=args.threads)
@@ -1780,7 +1789,8 @@ def main():
     gfaFile = os.path.join(SaveDir, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
-        details["Bandage plot"] = bandagePlot
+        if bandagePlot:
+            details["Bandage plot"] = bandagePlot
 
     htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
