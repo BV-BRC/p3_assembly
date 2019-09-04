@@ -57,7 +57,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     
     readStruct = {}
     readStruct["file"] = []
-    readStruct["path"] = []
+    #readStruct["path"] = []
     readStruct["problems"] = []
     readStruct["layout"] = 'na'
     readStruct["platform"] = 'na'
@@ -86,8 +86,8 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             os.symlink(os.path.abspath(read2), os.path.join(WorkDir,file2))
         readStruct["file"].append(file1)
         readStruct["file"].append(file2)
-        readStruct["path"].append(read1)
-        readStruct["path"].append(read2)
+        #readStruct["path"].append(read1)
+        #readStruct["path"].append(read2)
         # the "files" entry is an array1 of tuples, each tuple is a path, basename yielded by os.path.split
         registeredName = delim.join(sorted((file1, file2)))
     else:
@@ -104,7 +104,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             LOG.write("symlinking %s to %s\n"%(reads, os.path.join(WorkDir,file1)))
             os.symlink(os.path.abspath(reads), os.path.join(WorkDir,file1))
         readStruct["file"].append(file1)
-        readStruct["path"].append(reads)
+        #readStruct["path"].append(reads)
         registeredName = file1
 
     if supercedes:
@@ -872,7 +872,7 @@ def writeSpadesYamlFile(details):
     if len(details['platform']['nanopore']):
         nanopore_reads = []
         for item in details['platform']['nanopore']:
-            f = details['reads'][item]['path'][0]
+            f = details['reads'][item]['file'][0]
             nanopore_reads.append(f)
         if precedingElement:
             OUT.write(",\n")
@@ -905,13 +905,14 @@ def runQuast(contigsFile, args, details):
                     "--min-contig", str(args.min_contig_length),
                     contigsFile]
     LOG.write("running quast: "+" ".join(quastCommand)+"\n")
-    return_code = subprocess.call(quastCommand, shell=False, stderr=LOG)
+    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
+        return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
-    shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SaveDir, args.prefix+"quast_report.html"))
-    shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SaveDir, args.prefix+"quast_report.txt"))
-    #shutil.move(os.path.join(quastDir, "icarus_viewers"), os.path.join(SaveDir, "icarus_viewers"))
-    details["quast_txt"] = args.prefix+"quast_report.txt"
-    details["quast_html"] = args.prefix+"quast_report.html"
+    if return_code == 0:
+        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SaveDir, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SaveDir, args.prefix+"quast_report.txt"))
+        details["quast_txt"] = args.prefix+"quast_report.txt"
+        details["quast_html"] = args.prefix+"quast_report.html"
 
 def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, longReadDepth=None):
     """ 
@@ -1030,7 +1031,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     for item in details['reads']:
         if 'superceded_by' in details['reads'][item]:
             continue
-        files = details['reads'][item]['file'] # array of tuples (path, filename)
+        files = details['reads'][item]['file'] 
         if details['reads'][item]['length_class'] == 'short':
             if len(files) > 1:
                 short1 = files[0]
@@ -1043,7 +1044,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     if short1:
         command.extend(("--short1", short1, "--short2", short2))
     if unpaired:
-        command.extend(("--unpaired", " ".join(unpaired)))
+        command.extend(("--unpaired", unpaired))
     if long_reads:
         comand.extend(("--long", long_reads))
     # it is not quite right to send iontorrent data to spades through unicycler because the --iontorrent flag to spades will not be set
@@ -1199,26 +1200,46 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
         LOG.write('runMinimap returning %s\n'%contigSam)
         return contigSam
 
-    #otherwise format as bam (and index)
+    else:
+        contigsBam = convertSamToBam(contigSam, threads=threads)
+        LOG.write('runMinimap returning %s\n'%contigsBam)
+        return contigsBam
+            
+
+def convertSamToBam(samFile, threads=1):
+    #convert format to bam and index
+    LOG.write("convertSamToBam(%s, %d)\n"%(samFile, threads))
     tempTime = time()
     sortThreads = max(int(threads/2), 1)
-    fastqBase = longReadFastq
-    fastqBase = re.sub(r"\..*", "", fastqBase)
-    bamFile = contigFile+"_"+fastqBase+".bam"
-    command = "samtools view -bS -@ %d %s | samtools sort -@ %d - -o %s"%(sortThreads, contigSam, sortThreads, bamFile)
+    bamFileUnsorted = re.sub(".sam", "_unsorted.bam", samFile, re.IGNORECASE)
+    command = "samtools view -bS -@ %d -o %s %s"%(sortThreads, bamFileUnsorted, samFile)
     LOG.write("executing:\n"+command+"\n")
     return_code = subprocess.call(command, shell=True, stderr=LOG)
-    LOG.write("samtools view|sort return code = %d, time=%d\n"%(return_code, time()-tempTime))
-    os.remove(contigSam) #save a little space
+    LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
+        comment = "samtools view returned %d"%return_code
+        LOG.write(comment+"\n")
+        details["problems"].append(comment)
         return None
 
-    command = ["samtools", "index", bamFile]
+    #os.remove(samFile) #save a little space
+    bamFileSorted = re.sub(".sam", ".bam", samFile, re.IGNORECASE)
+    command = "samtools sort -@ %d -o %s %s"%(sortThreads, bamFileSorted, bamFileUnsorted)
+    LOG.write("executing:\n"+command+"\n")
+    LOG.flush()
+    return_code = subprocess.call(command, shell=True, stderr=LOG)
+    LOG.write("samtools sort return code = %d, time=%d\n"%(return_code, time()-tempTime))
+    if return_code != 0:
+        comment = "samtools sort returned %d"%return_code
+        LOG.write(comment+"\n")
+        details["problems"].append(comment)
+        return None
+
+    command = ["samtools", "index", bamFileSorted]
     LOG.write("executing:\n"+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
     LOG.write("samtools index return code = %d\n"%return_code)
-    LOG.write('runMinimap returning %s\n'%bamFile)
-    return bamFile
+    return bamFileSorted
 
 def runRacon(contigFile, longReadsFastq, details, threads=1):
     """
@@ -1282,21 +1303,10 @@ def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
     if outformat == 'sam':
         return samFile
 
-    sortThreads = max(int(threads/2), 1)
-    bamFile = re.sub(r".sam$", ".bam", samFile)
-    command = "samtools view -bS -@ %d %s | samtools sort -@ %d - -o %s"%(sortThreads, samFile, sortThreads, bamFile)
-    LOG.write("executing:\n"+command+"\n")
-    return_code = subprocess.call(command, shell=True, stderr=LOG)
-    LOG.write("samtools return code = %d\n"%return_code)
-    os.remove(samFile) #save a little space
-    if return_code != 0:
-        return None
-
-    command = ["samtools", "index", bamFile]
-    LOG.write("executing:\n"+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("samtools return code = %d\n"%return_code)
-    return bamFile
+    else:
+        contigsBam = convertSamToBam(samFile, threads=threads)
+        LOG.write('runBowtie returning %s\n'%contigsBam)
+        return contigsBam
 
 def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     """ 
