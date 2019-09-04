@@ -495,25 +495,32 @@ def sampleReads(filename, details=None):
 
     LOG.write("  file text sample %s:\n%s\n\n"%(filename, text[0:50]))
     lines = text.split("\n")
+    readLengths = []
     if len(lines) < 2:
         comment = "in sampleReads for %s: text sample (length %d) lacks at least 2 lines"%(filename, len(text))
         LOG.write(comment+"\n")
         details["problem"].append(comment)
     if lines[0].startswith("@"):
         read_format = 'fastq'
-    elif lines[0].startswith(">"):
-        read_format = 'fasta'
-        read_id_sample.append(lines[0].split()[0])
-    if read_format == 'fastq':
-        avg_read_length = 0
-        readLengths = []
         for i, line in enumerate(lines):
             if i % 4 == 0:
                 read_id_sample.append(line.split(' ')[0]) # get part up to first space, if any 
             elif i % 4 == 1:
                 readLengths.append(len(line)-1)
+    elif lines[0].startswith(">"):
+        read_format = 'fasta'
+        read_id_sample.append(lines[0].split()[0])
+        seq = ""
+        for line in lines:
+            if line.startswith(">"):
+                readLengths.append(len(seq))
+                seq = ""
+            else:
+                seq += line.rstrip()
+    avg_read_length = 0
+    if readLengths:
         avg_read_length = sum(readLengths)/float(len(readLengths))
-        LOG.write("fastq read type %s average read length %.1f\n"%(read_format, avg_read_length))
+    LOG.write("read type %s, average read length %.1f\n"%(read_format, avg_read_length))
     return read_id_sample, avg_read_length
 
 def findSingleDifference(s1, s2):
