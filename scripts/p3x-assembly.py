@@ -39,8 +39,8 @@ Read_file_type = {}
 Avg_read_length = {}
 LOG = None # create a log file at start of main()
 Start_time = None
-WorkDir = None
-SaveDir = None
+WORK_DIR = None
+SAVE_DIR = None
 
 def registerReads(reads, details, platform=None, interleaved=False, supercedes=None):
     """
@@ -78,12 +78,12 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             return None
         dir1, file1 = os.path.split(read1)
         dir2, file2 = os.path.split(read2)
-        if os.path.abspath(dir1) != WorkDir:
-            LOG.write("symlinking %s to %s\n"%(read1, os.path.join(WorkDir,file1)))
-            os.symlink(os.path.abspath(read1), os.path.join(WorkDir,file1))
-        if os.path.abspath(dir2) != WorkDir:
-            LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WorkDir,file2)))
-            os.symlink(os.path.abspath(read2), os.path.join(WorkDir,file2))
+        if os.path.abspath(dir1) != WORK_DIR:
+            LOG.write("symlinking %s to %s\n"%(read1, os.path.join(WORK_DIR,file1)))
+            os.symlink(os.path.abspath(read1), os.path.join(WORK_DIR,file1))
+        if os.path.abspath(dir2) != WORK_DIR:
+            LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WORK_DIR,file2)))
+            os.symlink(os.path.abspath(read2), os.path.join(WORK_DIR,file2))
         readStruct["file"].append(file1)
         readStruct["file"].append(file2)
         #readStruct["path"].append(read1)
@@ -100,9 +100,9 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         if interleaved:
             readStruct["interleaved"] = True
         dir1, file1 = os.path.split(reads)
-        if os.path.abspath(dir1) != WorkDir:
-            LOG.write("symlinking %s to %s\n"%(reads, os.path.join(WorkDir,file1)))
-            os.symlink(os.path.abspath(reads), os.path.join(WorkDir,file1))
+        if os.path.abspath(dir1) != WORK_DIR:
+            LOG.write("symlinking %s to %s\n"%(reads, os.path.join(WORK_DIR,file1)))
+            os.symlink(os.path.abspath(reads), os.path.join(WORK_DIR,file1))
         readStruct["file"].append(file1)
         #readStruct["path"].append(reads)
         registeredName = file1
@@ -137,7 +137,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         studySingleReads(registeredName, details)
     return registeredName
 
-def parseJasonParameters(args):
+def parseJsonParameters(args):
     if not os.path.exists(args.params_json):
         raise Exception("cannot find json parameters file %s\n"%args.params_json)
     LOG.write("parseJsonParameters() time=%d\n"%time())
@@ -173,11 +173,11 @@ def studyPairedReads(item, details):
     details['reads'][item]['num_reads'] = 0
     file1, file2 = item.split(":")
     if file1.endswith("gz"):
-        F1 = gzip.open(os.path.join(WorkDir, file1))
-        F2 = gzip.open(os.path.join(WorkDir, file2))
+        F1 = gzip.open(os.path.join(WORK_DIR, file1))
+        F2 = gzip.open(os.path.join(WORK_DIR, file2))
     else:
-        F1 = open(os.path.join(WorkDir, file1))
-        F2 = open(os.path.join(WorkDir, file2))
+        F1 = open(os.path.join(WORK_DIR, file1))
+        F2 = open(os.path.join(WORK_DIR, file2))
 
     line = F1.readline()
     sample_read_id = line.split(' ')[0]
@@ -277,14 +277,8 @@ def studySingleReads(item, details):
     sample_read_id = line.split(' ')[0] # get part up to first space, if any 
     F.seek(0)
     if sample_read_id.startswith(">"):
-        studyFastaReads(F)
-        if 'fasta' not in details['platform']:
-            details['platform']['fasta'] = []
-        details['platform']['fasta'].append(item)
-        details['reads'][item]['length_class'] = 'long'
-        details['reads'][item]['platform'] = 'fasta'
-        studyFastaReads(F1, item, details)
         F.close()
+        studyFastaReads(item, details)
         return
 
     seqLen1 = 0
@@ -359,13 +353,15 @@ def studyFastaReads(F, item, details):
     i = 0
     for line in F:
         if line.startswith(">"):
+            readNumber += 1
             if seq:
                 seqLen = len(seq)
                 totalReadLength += seqLen
                 maxReadLength = max(maxReadLength, seqLen) 
                 minReadLength = min(minReadLength, seqLen)
-                readNumber += 1
                 seq = ""
+            else:
+                sample_read_id = line.split()[0]
         else:
             seq += line.rstrip()
     if seq:
@@ -373,7 +369,6 @@ def studyFastaReads(F, item, details):
         totalReadLength += seqLen
         maxReadLength = max(maxReadLength, seqLen) 
         minReadLength = min(minReadLength, seqLen)
-        readNumber += 1
 
     avgReadLength = totalReadLength/readNumber
     details['reads'][item]['avg_len'] = avgReadLength
@@ -381,8 +376,11 @@ def studyFastaReads(F, item, details):
     details['reads'][item]['min_read_len'] = minReadLength
     details['reads'][item]['num_reads'] = readNumber
     details['reads'][item]['sample_read_id'] = sample_read_id 
+    details['reads'][item]['platform'] = 'fasta'
     details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, avgReadLength)
     details['reads'][item]['length_class'] = ["short", "long"][avgReadLength >= Max_short_read_length]
+    if item not in details['platform']['fasta']
+        details['platform']['fasta'].append(item)
 
     LOG.write("duration of studyFastaReads was %d seconds\n"%(time() - func_start))
     return
@@ -457,7 +455,7 @@ def trimGalore(details, threads=1):
                 LOG.write("re.findall for trim reports returned %s\n"%str(trimReports))
                 details["trim report"][reads]=[]
                 for f in trimReports:
-                    shutil.move(f, os.path.join(SaveDir, os.path.basename(f)))
+                    shutil.move(f, os.path.join(SAVE_DIR, os.path.basename(f)))
                     details["trim report"][reads].append(f)
             else:
                 command.append(reads)
@@ -484,7 +482,7 @@ def trimGalore(details, threads=1):
                 if trimReport:
                     trimReport = trimReport.group(1)
                     details["trim report"][reads]=trimReport
-                    shutil.move(trimReport, os.path.join(SaveDir, os.path.basename(trimReport)))
+                    shutil.move(trimReport, os.path.join(SAVE_DIR, os.path.basename(trimReport)))
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -908,8 +906,8 @@ def runQuast(contigsFile, args, details):
         return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
     if return_code == 0:
-        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SaveDir, args.prefix+"quast_report.html"))
-        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SaveDir, args.prefix+"quast_report.txt"))
+        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SAVE_DIR, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SAVE_DIR, args.prefix+"quast_report.txt"))
         details["quast_txt"] = args.prefix+"quast_report.txt"
         details["quast_html"] = args.prefix+"quast_report.html"
 
@@ -1075,7 +1073,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 
     if os.path.exists("unicycler.log"):
         unicyclerLogFile = prefix+"unicycler.log"
-        shutil.move("unicycler.log", os.path.join(SaveDir, unicyclerLogFile))
+        shutil.move("unicycler.log", os.path.join(SAVE_DIR, unicyclerLogFile))
 
     if not os.path.exists("assembly.fasta"):
         LOG.write("unicycler failed to generate assembly file.\n")
@@ -1091,7 +1089,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
                 contigIndex += 1
 
     assemblyGraphFile = prefix+"assembly_graph.gfa"
-    shutil.move("assembly.gfa", os.path.join(SaveDir, assemblyGraphFile))
+    shutil.move("assembly.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
 
     shutil.move("assembly.fasta", "contigs.fasta") #rename to canonical name
     return "contigs.fasta"
@@ -1159,9 +1157,9 @@ def runSpades(args, details):
         return None
     try:
         spadesLogFile = args.prefix+"spades.log"
-        shutil.move("spades.log", os.path.join(SaveDir, spadesLogFile))
+        shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
         assemblyGraphFile = args.prefix+"assembly_graph.gfa"
-        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SaveDir, assemblyGraphFile))
+        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
     except Exception as e:
         LOG.write(str(e))
     contigsFile = "contigs.fasta"
@@ -1486,7 +1484,7 @@ usage: canu [-version] [-citation] \
 
     LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
     if os.path.exists("canu.report"):
-        shutil.move("canu.report", os.path.join(SaveDir, prefix+"canu_report.txt"))
+        shutil.move("canu.report", os.path.join(SAVE_DIR, prefix+"canu_report.txt"))
     
     if not os.path.exists("canu.contigs.fasta"):
         LOG.write("canu failed to generate contigs file.\n")
@@ -1494,7 +1492,7 @@ usage: canu [-version] [-citation] \
         return None
     # rename to canonical contigs.fasta
     shutil.move("canu.contigs.fasta", "contigs.fasta")
-    shutil.move("canu.contigs.gfa", os.path.join(SaveDir, prefix+"assembly_graph.gfa"))
+    shutil.move("canu.contigs.gfa", os.path.join(SAVE_DIR, prefix+"assembly_graph.gfa"))
     return "contigs.fasta"
 
 def write_html_report(htmlFile, details):
@@ -1532,9 +1530,9 @@ def write_html_report(htmlFile, details):
         for reads in details["trim report"]:
             HTML.write("<b>"+reads+"</b><ul>")
             for report in details["trim report"][reads]:
-                if os.path.exists(os.path.join(SaveDir, report)):
+                if os.path.exists(os.path.join(SAVE_DIR, report)):
                     HTML.write("<pre>\n")
-                    HTML.write(open(os.path.join(SaveDir, report)).read())
+                    HTML.write(open(os.path.join(SAVE_DIR, report)).read())
                     HTML.write("\n</pre>\n")
         HTML.write("</div>\n")
 
@@ -1568,9 +1566,9 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
-        if os.path.exists(os.path.join(SaveDir, details["quast_txt"])):
+        if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
             HTML.write("<pre>\n")
-            HTML.write(open(os.path.join(SaveDir, details["quast_txt"])).read())
+            HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
             HTML.write("\n</pre>\n")
     
     if len(details["post-assembly transformation"]):
@@ -1630,18 +1628,18 @@ def main():
     baseName = args.outputDirectory #"p3_assembly" 
     if len(args.prefix) > 0 and not args.prefix.endswith("_"):
         args.prefix += "_"
-    global WorkDir
-    WorkDir = baseName+"_work"
-    if os.path.exists(WorkDir):
-        shutil.rmtree(WorkDir)
-    os.mkdir(WorkDir)
-    WorkDir = os.path.abspath(WorkDir)
-    global SaveDir
-    SaveDir = os.path.abspath(os.path.join(WorkDir, "save"))
-    if os.path.exists(SaveDir):
-        shutil.rmtree(SaveDir)
-    os.mkdir(SaveDir)
-    logfileName = os.path.join(SaveDir, args.prefix + "p3_assembly.log")
+    global WORK_DIR
+    WORK_DIR = baseName+"_work"
+    if os.path.exists(WORK_DIR):
+        shutil.rmtree(WORK_DIR)
+    os.mkdir(WORK_DIR)
+    WORK_DIR = os.path.abspath(WORK_DIR)
+    global SAVE_DIR
+    SAVE_DIR = os.path.abspath(os.path.join(WORK_DIR, "save"))
+    if os.path.exists(SAVE_DIR):
+        shutil.rmtree(SAVE_DIR)
+    os.mkdir(SAVE_DIR)
+    logfileName = os.path.join(SAVE_DIR, args.prefix + "p3_assembly.log")
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
@@ -1649,8 +1647,8 @@ def main():
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(Start_time))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
-    LOG.write("Work directory is "+WorkDir+"\n\n")
-    LOG.write("Final output will be saved to "+SaveDir+"\n\n")
+    LOG.write("Work directory is "+WORK_DIR+"\n\n")
+    LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
     details = { 'logfile' : logfileName }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
@@ -1688,7 +1686,7 @@ def main():
 
     # move into working directory so that all files are local
     original_working_directory = os.getcwd()
-    os.chdir(WorkDir)
+    os.chdir(WORK_DIR)
 
     if args.trim and len(details['platform']['illumina'] + details['platform']['iontorrent']):
         trimGalore(details, threads=args.threads)
@@ -1764,26 +1762,26 @@ def main():
                     bamFiles.append(bam)
         if len(bamFiles):
             longReadDepth = calcReadDepth(bamFiles)
-        saveContigsFile = os.path.join(SaveDir, args.prefix+"contigs.fasta")
+        saveContigsFile = os.path.join(SAVE_DIR, args.prefix+"contigs.fasta")
         filteredContigs = filterContigsByMinLength(contigs, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
         if filteredContigs:
             contigs = filteredContigs
     if contigs and os.path.getsize(contigs):
         runQuast(contigs, args, details)
-        shutil.move(contigs, os.path.join(SaveDir, args.prefix+"contigs.fasta"))
+        shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
 
-    gfaFile = os.path.join(SaveDir, args.prefix+"assembly_graph.gfa")
+    gfaFile = os.path.join(SAVE_DIR, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
-    htmlFile = os.path.join(SaveDir, args.prefix+"assembly_report.html")
+    htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - Start_time)/3600))
     LOG.close()
-    fp = file(os.path.join(SaveDir, args.prefix+"run_details.txt"), "w")
+    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.txt"), "w")
     json.dump(details, fp, indent=2, sort_keys=True)
     fp.close()
 
