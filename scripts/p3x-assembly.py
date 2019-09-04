@@ -510,7 +510,7 @@ def sampleReads(filename, details=None):
     if len(lines) < 2:
         comment = "in sampleReads for %s: text sample (length %d) lacks at least 2 lines"%(filename, len(text))
         LOG.write(comment+"\n")
-        details.problem.append(comment)
+        details["problem"].append(comment)
     if lines[0].startswith("@"):
         read_format = 'fastq'
     elif lines[0].startswith(">"):
@@ -575,26 +575,27 @@ def categorize_anonymous_read_files(args, details):
                 if pair:
                     comment = "candidate paired files: %s  %s"%pair
                     LOG.write(comment+"\n")
-                    details.problem.append(comment)
+                    details["problem"].append(comment)
                     if read_file_type[filename1] != read_file_type[filename2]:
                         comment = "Discordant fileTypes for %s(%s) vs %s(%s)"%(filename1, read_file_type[filename1], filename2, read_file_type[filename2])
                         LOG.write(comment+"\n")
-                        details.problem.append(comment)
+                        details["problem"].append(comment)
                         continue
-                    pairedFiles.append(pair)
+                    pairedFiles.append(pair[0] + ":" + pair[1])
 
     # now go over all pairs to test for matching types and matching read IDs
     valid_pairs = set()
     valid_singles = set()
     for item in pairedFiles:
+        print item
         if ":" in item:
             filename1, filename2 = item.split(":") 
         elif "%" in item:
             filename1, filename2 = item.split("%") 
         else:
-            comment = "failed to find ':' or '%' in file pair: "+item
+            comment = "failed to find ':' or '%%' in file pair: %s" % (item)
             LOG.write(comment+"\n")
-            details.problem.append(comment)
+            details["problem"].append(comment)
             continue
         if filename1 not in read_file_type:
             read_id_sample[filename1], avg_read_length = sampleReads(filename1, details)
@@ -614,7 +615,7 @@ def categorize_anonymous_read_files(args, details):
         if read_file_type[filename1] != read_file_type[filename2]:
             comment = "Discordant fileTypes for %s(%s) vs %s(%s)"%(filename1, read_file_type[filename1], filename2, read_file_type[filename2])
             LOG.write(comment+"\n")
-            details.problem.append(comment)
+            details["problem"].append(comment)
             read_types_match = False
         read_file_type[item] = read_file_type[filename1] #easier to retrieve later
 
@@ -625,7 +626,7 @@ def categorize_anonymous_read_files(args, details):
                 ids_paired = False
                 comment = "Read IDs do not match for %s(%s) vs %s(%s)"%(filename1, idpair[0], filename2, idpair[1])
                 LOG.write(comment+"\n")
-                details.problem.append(comment)
+                details["problem"].append(comment)
                 singleFiles.extend((filename1, filename2)) #move over to single files
                 break
         if read_types_match and ids_paired:
@@ -1610,6 +1611,7 @@ def main():
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help='JSON file with additional information.')
+    parser.add_argument('--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -1632,6 +1634,9 @@ def main():
         shutil.rmtree(SaveDir)
     os.mkdir(SaveDir)
     logfileName = os.path.join(SaveDir, args.prefix + "p3_assembly.log")
+
+    if args.path_prefix:
+        os.environ["PATH"] = ":".join(args.path_prefix) + ":" + os.environ["PATH"]
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
