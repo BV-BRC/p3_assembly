@@ -979,7 +979,7 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
     return outputFile
 
 def runBandage(gfaFile, details):
-    imageFormat = ".jpg"
+    imageFormat = ".svg"
     retval = None
     if os.path.exists(gfaFile):
         plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
@@ -1570,10 +1570,12 @@ def write_html_report(htmlFile, details):
 
     if "Bandage plot" in details:
         path, imageFile = os.path.split(details["Bandage plot"])
-        HTML.write("<h3>Bandage Plot</h3>\n")
-        HTML.write("<div class='a'>")
-        HTML.write("<img src='%s'>\n"%imageFile)
-        HTML.write("</div>\n")
+        if os.path.exists(os.path.join(WORK_DIR, imageFile)):
+            HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write("<div class='a'>")
+            HTML.write(open(svgTreeImage).read()+"\n\n")
+            #HTML.write("<img src='%s'>\n"%imageFile)
+            HTML.write("</div>\n")
     HTML.close()
 
 
@@ -1672,6 +1674,10 @@ def main():
     if args.nanopore:
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore')
+
+    if args.fasta:
+        for item in args.fasta:
+            registerReads(item, details, platform = 'fasta')
 
     if args.sra:
         fetch_sra_files(args.sra, details)
