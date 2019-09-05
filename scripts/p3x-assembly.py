@@ -54,9 +54,10 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     readStruct = {}
     readStruct["file"] = []
     #readStruct["path"] = []
-    readStruct["problems"] = []
+    readStruct["problem"] = []
     readStruct["layout"] = 'na'
     readStruct["platform"] = 'na'
+    readStruct['length_class'] = 'na'
     if ":" in reads or "%" in reads:
         if ":" in reads:
             delim = ["%", ":"][":" in reads] # ":" if it is, else "%"
@@ -159,10 +160,6 @@ def studyPairedReads(item, details):
     """
     func_start = time()
     LOG.write("studyPairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details["reads"]:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'paired-end'
     details['reads'][item]['avg_len'] = 0
     details['reads'][item]['length_class'] = 'na'
@@ -209,7 +206,7 @@ def studyPairedReads(item, details):
                 diff = findSingleDifference(read_id_1, read_id_2)
                 if diff == None or sorted(diff) != ('1', '2'):
                     read_ids_paired = False
-                    details['reads'][item]["problems"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
+                    details['reads'][item]["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
         elif i % 4 == 1:
             seqLen1 = len(line1)-1
             seqLen2 = len(line2)-1
@@ -219,7 +216,7 @@ def studyPairedReads(item, details):
                     readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
                     seqQualLenMatch = False
                     comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
-                    details['reads'][item]["problems"].append(comment)
+                    details['reads'][item]["problem"].append(comment)
                     LOG.write(comment+"\n")
             totalReadLength += seqLen1 + seqLen2
             maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
@@ -252,13 +249,8 @@ def studyPairedReads(item, details):
 def studySingleReads(item, details):
     func_start = time()
     LOG.write("studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details['reads']:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'single-end'
     details['reads'][item]['num_reads'] = 0
-    details['reads'][item]['problems'] = []
     if item.endswith("gz"):
         F = gzip.open(item)
     else:
@@ -300,7 +292,7 @@ def studySingleReads(item, details):
             if seqQualLenMatch and (seqLen != qualLen):
                 seqQualLenMatch = False
                 comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                details['reads'][item]["problems"].append(comment)
+                details['reads'][item]["problem"].append(comment)
                 LOG.write(comment+"\n")
             totalReadLength += seqLen
             maxReadLength = max(maxReadLength, seqLen) 
@@ -1212,7 +1204,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     #os.remove(samFile) #save a little space
@@ -1225,7 +1217,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools sort returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     command = ["samtools", "index", bamFileSorted]
@@ -1508,13 +1500,13 @@ def write_html_report(htmlFile, details):
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
         for key in sorted(details['reads'][item]):
-            if key == 'problems':
+            if key == 'problem':
                 continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
-        if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+        if "problem" in details['reads'][item] and details['reads'][item]['problem']:
             HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-            for prob in details['reads'][item]['problems']:
+            for prob in details['reads'][item]['problem']:
                 HTML.write("<li>"+prob+"\n")
             HTML.write("</ul></div>\n")
     
@@ -1540,13 +1532,13 @@ def write_html_report(htmlFile, details):
         for item in details['derived_reads']:
             HTML.write(item+"<table class='a'>")
             for key in sorted(details['reads'][item]):
-                if key == 'problems':
+                if key == 'problem':
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
-            if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+            if "problem" in details['reads'][item] and details['reads'][item]['problem']:
                 HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-                for prob in details['reads'][item]['problems']:
+                for prob in details['reads'][item]['problem']:
                     HTML.write("<li>"+prob+"\n")
                 HTML.write("</ul></div>\n")
 
