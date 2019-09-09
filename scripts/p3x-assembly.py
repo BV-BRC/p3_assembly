@@ -54,9 +54,10 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     readStruct = {}
     readStruct["file"] = []
     #readStruct["path"] = []
-    readStruct["problems"] = []
+    readStruct["problem"] = []
     readStruct["layout"] = 'na'
     readStruct["platform"] = 'na'
+    readStruct['length_class'] = 'na'
     if ":" in reads or "%" in reads:
         if ":" in reads:
             delim = ["%", ":"][":" in reads] # ":" if it is, else "%"
@@ -159,10 +160,6 @@ def studyPairedReads(item, details):
     """
     func_start = time()
     LOG.write("studyPairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details["reads"]:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'paired-end'
     details['reads'][item]['avg_len'] = 0
     details['reads'][item]['length_class'] = 'na'
@@ -209,7 +206,7 @@ def studyPairedReads(item, details):
                 diff = findSingleDifference(read_id_1, read_id_2)
                 if diff == None or sorted(diff) != ('1', '2'):
                     read_ids_paired = False
-                    details['reads'][item]["problems"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
+                    details['reads'][item]["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
         elif i % 4 == 1:
             seqLen1 = len(line1)-1
             seqLen2 = len(line2)-1
@@ -219,7 +216,7 @@ def studyPairedReads(item, details):
                     readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
                     seqQualLenMatch = False
                     comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
-                    details['reads'][item]["problems"].append(comment)
+                    details['reads'][item]["problem"].append(comment)
                     LOG.write(comment+"\n")
             totalReadLength += seqLen1 + seqLen2
             maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
@@ -252,13 +249,8 @@ def studyPairedReads(item, details):
 def studySingleReads(item, details):
     func_start = time()
     LOG.write("studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details['reads']:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'single-end'
     details['reads'][item]['num_reads'] = 0
-    details['reads'][item]['problems'] = []
     if item.endswith("gz"):
         F = gzip.open(item)
     else:
@@ -300,7 +292,7 @@ def studySingleReads(item, details):
             if seqQualLenMatch and (seqLen != qualLen):
                 seqQualLenMatch = False
                 comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                details['reads'][item]["problems"].append(comment)
+                details['reads'][item]["problem"].append(comment)
                 LOG.write(comment+"\n")
             totalReadLength += seqLen
             maxReadLength = max(maxReadLength, seqLen) 
@@ -914,80 +906,91 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("filterContigsByMinLength(%s) \n"%(inputFile))
+    report = []
+    report.append("min_contig_length = %d"%args.min_contig_length)
+    report.append("min_contig_coverage = %.1f"%args.min_contig_coverage)
+    bad_contigs = []
+    details['circular_contigs'] = []
+    no_coverage_available = False
     if not shortReadDepth and not longReadDepth:
-        LOG.write("Neither shortReadDepth nor longReadDepth provided. Quiting.\n")
-        return None
-    suboptimalReads = ""
+        no_coverage_available = True
+        comment = "No read coverage information available"
+        LOG.write(comment+"\n")
+        report.append(comment)
+    else:
+        if shortReadDepth:
+            comment = "Short read coverage information available"
+            LOG.write(comment+"\n")
+            report.append(comment)
+        if longReadDepth:
+            comment = "Long read coverage information available"
+            LOG.write(comment+"\n")
+            report.append(comment)
+    suboptimalContigs = ""
+    num_good_contigs = num_bad_contigs = 0
     outputFile = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputFile)
     LOG.write("writing filtered contigs to %s\n"%outputFile)
     with open(inputFile) as IN:
         with open(outputFile, 'w') as OUT:
-            shortCovTags = ['coverage', 'normalized_cov']
-            longCovTags = ['coverage_longread', 'normalized_cov_longread']
             seqId=None
             seq = ""
             contigIndex = 1
-            contigCoverage = 0
-            for line in IN:
+            line = "1"
+            while line:
+                line = IN.readline()
                 m = re.match(r">(\S+)", line)
-                if m:
+                if m or not line: 
                     if seq:
-                        contigId = ">"+args.prefix+"contig_%d length %5d"%(contigIndex, len(seq))
+                        contigId = ">"+args.prefix+"contig_%d"%contigIndex
+                        contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
                         contigCoverage = 0
                         if shortReadDepth and seqId in shortReadDepth:
                             meanDepth, normalizedDepth = shortReadDepth[seqId]
-                            contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
+                            contigInfo += " coverage %.01f normalized_cov %.2f"%(meanDepth, normalizedDepth)
                             contigCoverage = meanDepth
                         if longReadDepth and seqId in longReadDepth:
                             meanDepth, normalizedDepth = longReadDepth[seqId]
-                            contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
+                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(meanDepth, normalizedDepth)
                             contigCoverage = max(meanDepth, contigCoverage)
                         if "contigCircular" in details and contigIndex in details["contigCircular"]:
-                            contigId += " circular=true"
-                        if len(seq) >= args.min_contig_length and contigCoverage >= args.min_contig_coverage:
-                            OUT.write(contigId+"\n")
+                            contigInfo += " circular=true"
+                            details['circular_contigs'].append(contigId+contigInfo)
+                        if len(seq) >= args.min_contig_length and (no_coverage_available or contigCoverage >= args.min_contig_coverage):
+                            OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
+                            num_good_contigs += 1
                         else:
-                            suboptimalReads += contigId+"\n"+seq+"\n"
-                    seq = ""
-                    seqId = m.group(1)
-                else:
+                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
+                            bad_contigs.append(contigId+contigInfo)
+                            num_bad_contigs += 1
+                        seq = ""
+                    if m:
+                        seqId = m.group(1)
+                elif line:
                     seq += line.rstrip()
-            if seq:
-                contigId = ">"+args.prefix+"contig_%d length %5d"%(contigIndex, len(seq))
-                contigCoverage = 0
-                if shortReadDepth and seqId in shortReadDepth:
-                    meanDepth, normalizedDepth = shortReadDepth[seqId]
-                    contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
-                    contigCoverage = meanDepth
-                if longReadDepth and seqId in longReadDepth:
-                    meanDepth, normalizedDepth = longReadDepth[seqId]
-                    contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
-                    contigCoverage = max(meanDepth, contigCoverage)
-                if "contigCircular" in details and contigIndex in details["contigCircular"]:
-                    contigId += " circular=true"
-                if len(seq) >= args.min_contig_length and contigCoverage >= args.min_contig_coverage:
-                    OUT.write(contigId+"\n")
-                    for i in range(0, len(seq), 60):
-                        OUT.write(seq[i:i+60]+"\n")
-                else:
-                    suboptimalReads += contigId+"\n"+seq+"\n"
-    if suboptimalReads:
-        suboptimalReadsFile = re.sub(r"\..*", "_short_or_low_coverage.fasta", outputFile)
-        with open(suboptimalReadsFile, "w") as SUBOPT:
-            SUBOPT.write(suboptimalReads)
+    report.append("Number of contigs above thresholds: %d"%num_good_contigs)
+    report.append("Number of contigs below thresholds: %d"%num_bad_contigs)
+    if suboptimalContigs:
+        details['bad_contigs'] = bad_contigs
+        suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
+        report.append("bad contigs written to "+suboptimalContigsFile)
+        details['suboptimal_contigs'] = suboptimalContigsFile
+        suboptimalContigsFile = os.path.join(SAVE_DIR, suboptimalContigsFile)
+        with open(suboptimalContigsFile, "w") as SUBOPT:
+            SUBOPT.write(suboptimalContigs)
     if os.path.getsize(outputFile) < 10:
         LOG.write("failed to generate outputFile, return None\n")
         return None
+    details['contig_filtering'] = report
     comment = "trimContigsByMinLength, input %s, output %s"%(inputFile, outputFile)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     return outputFile
 
 def runBandage(gfaFile, details):
-    imageFormat = ".jpg"
+    imageFormat = ".svg"
     retval = None
     if os.path.exists(gfaFile):
         plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
@@ -1212,7 +1215,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     #os.remove(samFile) #save a little space
@@ -1225,7 +1228,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools sort returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     command = ["samtools", "index", bamFileSorted]
@@ -1497,8 +1500,8 @@ usage: canu [-version] [-citation] \
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
-    HTML.write("<head><style>\n.a { text-indent: 50px }\n")
-    HTML.write(".b {text-indent: 75px }\n")
+    HTML.write("<head><style>\n.a { left-margin: 50px }\n")
+    HTML.write(".b {left-margin: 75px }\n")
     HTML.write("</style></head>")
     HTML.write("<h1>Genome Assembly Report</h1>\n")
 
@@ -1508,21 +1511,22 @@ def write_html_report(htmlFile, details):
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
         for key in sorted(details['reads'][item]):
-            if key == 'problems':
+            if key == 'problem':
                 continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
-        if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+        if "problem" in details['reads'][item] and details['reads'][item]['problem']:
             HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-            for prob in details['reads'][item]['problems']:
+            for prob in details['reads'][item]['problem']:
                 HTML.write("<li>"+prob+"\n")
             HTML.write("</ul></div>\n")
     
     if details["pre-assembly transformation"]:
         HTML.write("<h3>Pre-Assembly Transformations</h3>\n<div class='a'>\n")
+        HTML.write("<ul>\n")
         for line in details["pre-assembly transformation"]:
-            HTML.write("<p>"+line+"\n")
-        HTML.write("</div>\n")
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
 
     if "trim report" in details:
         HTML.write("<h3>Trimming Report</h3>\n<div class='a'>\n")
@@ -1540,13 +1544,13 @@ def write_html_report(htmlFile, details):
         for item in details['derived_reads']:
             HTML.write(item+"<table class='a'>")
             for key in sorted(details['reads'][item]):
-                if key == 'problems':
+                if key == 'problem':
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
-            if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+            if "problem" in details['reads'][item] and details['reads'][item]['problem']:
                 HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-                for prob in details['reads'][item]['problems']:
+                for prob in details['reads'][item]['problem']:
                     HTML.write("<li>"+prob+"\n")
                 HTML.write("</ul></div>\n")
 
@@ -1571,17 +1575,48 @@ def write_html_report(htmlFile, details):
             HTML.write("\n</pre>\n")
     
     if details["post-assembly transformation"]:
-        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
-        for line in details["post-assembly transformation"]:
-            HTML.write("<p>"+line+"<br>\n")
+        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n<ul>\n")
+        HTML.write("<ul>\n")
+        for line in details['post-assembly transformation']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
+
+    if "circular_contigs" in details and details['circular_contigs']:
+        HTML.write("<h3>Circular Contigs</h3>\n<div class='a'>\n")
+        HTML.write("<b>As suggested by Unicycler</b>\n")
+        HTML.write("<ul>\n")
+        for line in details['circular_contigs']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
+
+    if "contig_filtering" in details and details['contig_filtering']:
+        HTML.write("<h3>Contig Filtering</h3>\n<div class='a'>\n")
+        HTML.write("<ul>\n")
+        for line in details['contig_filtering']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul>\n")
+
+        if "bad_contigs" in details and details["bad_contigs"]:
+            HTML.write("<b>Contigs Below Thresholds</b>\n")
+            if len(details["bad_contigs"]) > 10:
+                HTML.write("<b>Showing first 10 entries</b>\n")
+            HTML.write("<ul>\n")
+            for line in details['bad_contigs'][:10]:
+                HTML.write("<li>"+line+"\n")
+            HTML.write("</ul>\n")
         HTML.write("</div>\n")
 
     if "Bandage plot" in details:
-        path, imageFile = os.path.split(details["Bandage plot"])
-        HTML.write("<h3>Bandage Plot</h3>\n")
-        HTML.write("<div class='a'>")
-        HTML.write("<img src='%s'>\n"%imageFile)
-        HTML.write("</div>\n")
+        #path, imageFile = os.path.split(details["Bandage plot"])
+        if os.path.exists(details["Bandage plot"]):
+            svg_text = open(details["Bandage plot"]).read()
+            svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
+            HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write("<div class='a'>")
+            HTML.write(svg_text+"\n\n")
+            #HTML.write("<img src='%s'>\n"%imageFile)
+            HTML.write("</div>\n")
+    HTML.write("</html>\n")
     HTML.close()
 
 
@@ -1681,6 +1716,10 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore')
 
+    if args.fasta:
+        for item in args.fasta:
+            registerReads(item, details, platform = 'fasta')
+
     if args.sra:
         fetch_sra_files(args.sra, details)
 
@@ -1776,15 +1815,15 @@ def main():
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
+    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.txt"), "w")
+    json.dump(details, fp, indent=2, sort_keys=True)
+    fp.close()
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - START_TIME)/3600))
     LOG.close()
-    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.txt"), "w")
-    json.dump(details, fp, indent=2, sort_keys=True)
-    fp.close()
 
 
 if __name__ == "__main__":
