@@ -1075,8 +1075,10 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         shutil.move("unicycler.log", os.path.join(SAVE_DIR, unicyclerLogFile))
 
     if not os.path.exists("assembly.fasta"):
-        LOG.write("unicycler failed to generate assembly file.\n")
-        details["problem"].append("unicycler failed to generate contigs file")
+        comment = "Unicycler failed to generate assembly file."
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
         return None
     details["contigCircular"] = []
     with open("assembly.fasta") as F:
@@ -1093,7 +1095,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     shutil.move("assembly.fasta", "contigs.fasta") #rename to canonical name
     return "contigs.fasta"
 
-def runSpades(args, details):
+def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
 
@@ -1151,8 +1153,10 @@ def runSpades(args, details):
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
     if not os.path.exists("contigs.fasta"):
-        LOG.write("spades failed to generate contigs.fasta.\n")
-        details["problem"].append("spades failed to generate contigs.fasta")
+        comment = "SPAdes failed to generate contigs file."
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
         return None
     try:
         spadesLogFile = args.prefix+"spades.log"
@@ -1489,8 +1493,10 @@ usage: canu [-version] [-citation] \
         shutil.move("canu.report", os.path.join(SAVE_DIR, prefix+"canu_report.txt"))
     
     if not os.path.exists("canu.contigs.fasta"):
-        LOG.write("canu failed to generate contigs file.\n")
-        details["problem"].append("canu failed to generate contigs file")
+        comment = "Canu failed to generate contigs file."
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
         return None
     # rename to canonical contigs.fasta
     shutil.move("canu.contigs.fasta", "contigs.fasta")
@@ -1747,7 +1753,7 @@ def main():
             else:
                 args.recipe = "unicycler"
     if "spades" in args.recipe or args.recipe == "single-cell":
-        contigs = runSpades(args, details)
+        contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
     elif args.recipe == "canu":
