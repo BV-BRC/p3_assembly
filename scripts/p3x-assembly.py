@@ -900,15 +900,33 @@ def runQuast(contigsFile, args, details):
         details["quast_txt"] = args.prefix+"quast_report.txt"
         details["quast_html"] = args.prefix+"quast_report.html"
 
-def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, longReadDepth=None):
+def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
     Write only sequences at or above min_length to output file.
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    LOG.write("filterContigsByMinLength(%s) \n"%(inputFile))
+    LOG.write("filterContigsByMinLength(%s) \n"%(inputContigs))
+    shortReadDepth = None
+    longReadDepth = None
+    bamFiles = []
+    for reads in details['reads']:
+        if details['reads'][reads]['length_class'] == 'short':
+            bam = runBowtie(inputContigs, reads, details, threads=threads, outformat='bam')
+            if bam:
+                bamFiles.append(bam)
+    if bamFiles:
+        shortReadDepth = calcReadDepth(bamFiles)
+    bamFiles = []
+    for reads in details['reads']:
+        if details['reads'][reads]['length_class'] == 'long':
+            bam = runMinimap(inputContigs, reads, details, threads=threads, outformat='bam')
+            if bam:
+                bamFiles.append(bam)
+    if bamFiles:
+        longReadDepth = calcReadDepth(bamFiles)
     report = []
-    report.append("min_contig_length = %d"%args.min_contig_length)
-    report.append("min_contig_coverage = %.1f"%args.min_contig_coverage)
+    report.append("min_contig_length = %d"%min_contig_length)
+    report.append("min_contig_coverage = %.1f"%min_contig_coverage)
     bad_contigs = []
     details['circular_contigs'] = []
     no_coverage_available = False
@@ -928,10 +946,10 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
             report.append(comment)
     suboptimalContigs = ""
     num_good_contigs = num_bad_contigs = 0
-    outputFile = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputFile)
-    LOG.write("writing filtered contigs to %s\n"%outputFile)
-    with open(inputFile) as IN:
-        with open(outputFile, 'w') as OUT:
+    outputContigs = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputContigs)
+    LOG.write("writing filtered contigs to %s\n"%outputContigs)
+    with open(inputContigs) as IN:
+        with open(outputContigs, 'w') as OUT:
             seqId=None
             seq = ""
             contigIndex = 1
@@ -941,7 +959,7 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
                 m = re.match(r">(\S+)", line)
                 if m or not line: 
                     if seq:
-                        contigId = ">"+args.prefix+"contig_%d"%contigIndex
+                        contigId = ">"+prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
                         contigCoverage = 0
@@ -956,7 +974,7 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
                         if "contigCircular" in details and contigIndex in details["contigCircular"]:
                             contigInfo += " circular=true"
                             details['circular_contigs'].append(contigId+contigInfo)
-                        if len(seq) >= args.min_contig_length and (no_coverage_available or contigCoverage >= args.min_contig_coverage):
+                        if len(seq) >= min_contig_length and (no_coverage_available or contigCoverage >= min_contig_coverage):
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
@@ -980,14 +998,14 @@ def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, long
         suboptimalContigsFile = os.path.join(SAVE_DIR, suboptimalContigsFile)
         with open(suboptimalContigsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalContigs)
-    if os.path.getsize(outputFile) < 10:
-        LOG.write("failed to generate outputFile, return None\n")
+    if os.path.getsize(outputContigs) < 10:
+        LOG.write("failed to generate outputContigs, return None\n")
         return None
     details['contig_filtering'] = report
-    comment = "trimContigsByMinLength, input %s, output %s"%(inputFile, outputFile)
+    comment = "trimContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
-    return outputFile
+    return outputContigs
 
 def runBandage(gfaFile, details):
     imageFormat = ".svg"
@@ -1075,7 +1093,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         shutil.move("unicycler.log", os.path.join(SAVE_DIR, unicyclerLogFile))
 
     if not os.path.exists("assembly.fasta"):
-        comment = "Unicycler failed to generate assembly file."
+        comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
         details["problem"].append(comment)
@@ -1092,8 +1110,10 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     assemblyGraphFile = prefix+"assembly_graph.gfa"
     shutil.move("assembly.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
 
-    shutil.move("assembly.fasta", "contigs.fasta") #rename to canonical name
-    return "contigs.fasta"
+    contigsFile = "contigs.fasta"
+    shutil.move("assembly.fasta", contigsFile) #rename to canonical name
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    return contigsFile
 
 def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
@@ -1152,12 +1172,14 @@ def runSpades(details, args):
         }
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
-    if not os.path.exists("contigs.fasta"):
-        comment = "SPAdes failed to generate contigs file."
+    contigsFile = "contigs.fasta"
+    if not os.path.exists(contigsFile):
+        comment = "SPAdes failed to generate contigs file. Check "+spadesLogFile
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
         details["problem"].append(comment)
         return None
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     try:
         spadesLogFile = args.prefix+"spades.log"
         shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
@@ -1165,7 +1187,6 @@ def runSpades(details, args):
         shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
     except Exception as e:
         LOG.write(str(e))
-    contigsFile = "contigs.fasta"
     return contigsFile
 
 def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
@@ -1493,23 +1514,26 @@ usage: canu [-version] [-citation] \
         shutil.move("canu.report", os.path.join(SAVE_DIR, prefix+"canu_report.txt"))
     
     if not os.path.exists("canu.contigs.fasta"):
-        comment = "Canu failed to generate contigs file."
+        comment = "Canu failed to generate contigs file. Check "+prefix+"canu_report.txt"
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
         details["problem"].append(comment)
         return None
     # rename to canonical contigs.fasta
-    shutil.move("canu.contigs.fasta", "contigs.fasta")
+    contigsFile = "contigs.fasta"
+    shutil.move("canu.contigs.fasta", contigsFile)
     shutil.move("canu.contigs.gfa", os.path.join(SAVE_DIR, prefix+"assembly_graph.gfa"))
-    return "contigs.fasta"
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    return contigsFile
 
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
     HTML.write("<head><style>\n.a { left-margin: 50px }\n")
     HTML.write(".b {left-margin: 75px }\n")
-    HTML.write("</style></head>")
+    HTML.write("</style></head>\n")
     HTML.write("<h1>Genome Assembly Report</h1>\n")
+    HTML.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
 
     HTML.write("<h3>Input reads:</h3>\n")
     for item in details['reads']:
@@ -1646,8 +1670,8 @@ def main():
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=300, help='save contigs of this length or longer', required=False)
-    parser.add_argument('--min_contig_coverage', default=5, help='save contigs of this coverage or deeper', required=False)
+    parser.add_argument('--min_contig_length', type=int, default=300, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_coverage', type=float, default=5, help='save contigs of this coverage or deeper', required=False)
     parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
@@ -1791,25 +1815,7 @@ def main():
                 break
         
     if contigs and os.path.getsize(contigs):
-        shortReadDepth = {}
-        longReadDepth = {}
-        bamFiles = []
-        for reads in details['reads']:
-            if details['reads'][reads]['length_class'] == 'short':
-                bam = runBowtie(contigs, reads, details, threads=args.threads, outformat='bam')
-                if bam:
-                    bamFiles.append(bam)
-        if bamFiles:
-            shortReadDepth = calcReadDepth(bamFiles)
-        bamFiles = []
-        for reads in details['reads']:
-            if details['reads'][reads]['length_class'] == 'long':
-                bam = runMinimap(contigs, reads, details, threads=args.threads, outformat='bam')
-                if bam:
-                    bamFiles.append(bam)
-        if bamFiles:
-            longReadDepth = calcReadDepth(bamFiles)
-        filteredContigs = filterContigsByMinLength(contigs, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
+        filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
         if filteredContigs:
             contigs = filteredContigs
     if contigs and os.path.getsize(contigs):
@@ -1821,7 +1827,7 @@ def main():
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
-    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.txt"), "w")
+    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.json"), "w")
     json.dump(details, fp, indent=2, sort_keys=True)
     fp.close()
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
