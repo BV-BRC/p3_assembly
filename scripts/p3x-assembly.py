@@ -135,6 +135,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     return registeredName
 
 def parseJsonParameters(args):
+    """ Not fully implemented: should read assembly2 service json file """
     if not os.path.exists(args.params_json):
         raise Exception("cannot find json parameters file %s\n"%args.params_json)
     LOG.write("parseJsonParameters() time=%d\n"%time())
@@ -149,9 +150,6 @@ def parseJsonParameters(args):
             for pe in data["single_end_libs"]:
                 if pe["platform"] == 'illumina':
                     pass
-        if "srr_ids" in data:
-            if not args.sra:
-                pass
     return
 
 def studyPairedReads(item, details):
@@ -574,7 +572,6 @@ def categorize_anonymous_read_files(args, details):
     valid_pairs = set()
     valid_singles = set()
     for item in pairedFiles:
-        print item
         if ":" in item:
             filename1, filename2 = item.split(":") 
         elif "%" in item:
