@@ -202,7 +202,7 @@ def studyPairedReads(item, details):
                 sample_read_id = read_id_1
             if not read_id_1 == read_id_2:
                 diff = findSingleDifference(read_id_1, read_id_2)
-                if diff == None or sorted(diff) != ('1', '2'):
+                if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
                     read_ids_paired = False
                     details['reads'][item]["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
         elif i % 4 == 1:
@@ -280,7 +280,7 @@ def studySingleReads(item, details):
             if interleaved and i % 8 == 0 and prev_read_id: # at every other sample ID check for matching prev, indicates interleaved
                 if prev_read_id != sample_read_id:
                     diff = findSingleDifference(prev_read_id, sample_read_id)
-                    if diff == None or sorted(diff) != ('1', '2'):
+                    if diff == None or sorted(prev_read_id[diff[0]:diff[1]], sample_read_id[diff[0]:diff[1]]) != ('1', '2'):
                         interleaved=False
 
         elif i % 4 == 1:
@@ -514,25 +514,48 @@ def sampleReads(filename, details=None):
     return read_id_sample, avg_read_length
 
 def findSingleDifference(s1, s2):
-# if two strings differ in only a single position, return the chars at that pos, else return None
+# if two strings differ in only a single contiguous region, return the start and end of region, else return None
     if len(s1) != len(s2):
         return None
-    retval = None
-    for c1, c2 in zip(s1, s2):
+    start = None
+    end = None
+    for i, (c1, c2) in enumerate(zip(s1, s2)):
         if c1 != c2:
-            if retval:
+            if end:
                 return None
-            retval = (c1, c2)
-    return retval
+            if not start:
+                start = i
+        elif start and not end:
+           end = i
+    if start and not end:
+        end = i+1
+    return (start, end)
 
 def categorize_anonymous_read_files(args, details):
     LOG.write("categorize_anonymous_read_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("  files=%s\n"%("\t".join(args.anonymous_reads)))
+
+    nonSraFiles = []
+    sraFiles = {}
+    # first pull out any SRA files for special treatment
+    for item in args.anonymous_reads:
+        m = re.match("([SED]RR\d+)", item)
+        if m:
+            sra = m.group(1)
+            if sra not in sraFiles:
+                sraFiles[sra] = [] 
+            sraFiles[sra].append(item)
+        else:
+            nonSraFiles.append(item)
+    for sra in sraFiles:
+        processSraFastqFiles(sorted(sraFiles), details)
+
+    # now proceed with any non-sra files
     read_file_type = {}
     read_id_sample = {}
     singleFiles = []
     pairedFiles = []
-    for item in args.anonymous_reads:
+    for item in nonSraFiles:
         if ":" in item or "%" in item:
             pairedFiles.append(item)
         else:
@@ -550,12 +573,15 @@ def categorize_anonymous_read_files(args, details):
         for filename2 in singleFiles[i+1:]:
             singleDiff = findSingleDifference(filename1, filename2)
 # singleDiff will be not None if the strings match at all but one character (presumably '1' vs '2')
-            if singleDiff:
-                intDiffs = (int(singleDiff[0]), int(singleDiff[1]))
+            if singleDiff and singleDiff[0] > 0 and singleDiff[1]-singleDiff[0] == 1:
+                charBefore = filename1[singleDiff[0]-1]
+                if charBefore.isdigit():
+                    continue # changes in multi-digit numbers are not indicative of paired reads
+                diffChars = (filename1[singleDiff[0]], filename2[singleDiff[0]])
                 pair = None
-                if intDiffs[0] == 1 and intDiffs[1] == 2:
+                if diffChars[0] == '1' and diffChars[1] == '2':
                     pair = (filename1, filename2)
-                elif intDiffs[1] == 1 and intDiffs[0] == 2:
+                elif diffChars[1] == '1' and diffChars[0] == '2':
                     pair = (filename2, filename1)
                 if pair:
                     comment = "candidate paired files: %s  %s"%pair
@@ -606,7 +632,11 @@ def categorize_anonymous_read_files(args, details):
         # test if read IDs match between files
         ids_paired = True
         for idpair in zip(read_id_sample[filename1], read_id_sample[filename2]):
-            if idpair[0] != idpair[1] and not findSingleDifference(idpair[0], idpair[1]):
+            if idpair[0] == idpair[1]:
+                continue
+            diff = findSingleDifference(idpair[0], idpair[1])
+            # diff reports start and end of contiguous region of different characters (if only one)
+            if not diff or sorted(idpair[0][diff[0]:diff[1]], idpair[1][diff[0]:diff[1]]) != ('1', '2'):
                 ids_paired = False
                 comment = "Read IDs do not match for %s(%s) vs %s(%s)"%(filename1, idpair[0], filename2, idpair[1])
                 LOG.write(comment+"\n")
@@ -732,43 +762,62 @@ def fetch_sra_files(sra_ids, details):
         fetch_one_sra(sraFull, run_info=runinfo, log=LOG)
         fastqFiles = glob.glob(sra+"*fastq")
         LOG.write("Fastq files from sra: %s\n"%str(fastqFiles))
-        item = None
-        if runinfo['LibraryLayout'].startswith("PAIRED"):
-            if len(fastqFiles) == 2:
-                item = ":".join(sorted(fastqFiles)[:2])
-            else:
-                comment = "for PAIRED library %s, number of files was %s, expected 2"%(sra, len(fastqFiles))
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-        if not item: # library layout single or failed above
-            if len(fastqFiles) == 1:
-                item = fastqFiles[0]
-            if len(fastqFiles) > 1:
-                subprocess.call("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
-                item = sra+".fastq"
-                comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-            if not item:
-                comment = "for %s no fastq file found"%sra
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-                continue # failed on that sra
-   
-        platform = None
-        if runinfo["Platform"] == "ILLUMINA":
-            platform = "illumina"
-        elif runinfo["Platform"] == "ION_TORRENT":
-            platform = "iontorrent"
-        elif runinfo["Platform"] == "PACBIO_SMRT":
-            platform = "pacbio"
-        elif runinfo["Platform"] == "OXFORD_NANOPORE":
-            platform = "nanopore"
-        if not platform:
-            ids, avg_length = sampleReads(fastqFiles[0], details)
-            platform = ["illumina", "pacbio"][avg_length > MAX_SHORT_READ_LENGTH]
-        registerReads(item, details, platform=platform)
+        processSraFastqFiles(fastqFiles, details, runinfo)
+    return
 
+def processSraFastqFiles(fastqFiles, details, run_info=None):
+    """ manipulate multiple (or single) fastq files from one SRA runId and register reads """
+    item = None
+    m = re.match(r"([SED]RR\d+)", fastqFiles[0])
+    if not m:
+        comment = "supposed sra fastq file does not start with [SED]RRnnnn"
+        details['problem'].append(comment)
+        LOG.write(comment+"\n")
+        return
+    sra = m.group(1)
+    if not run_info:
+        run_info = get_sra_runinfo(sra)
+
+    if run_info['LibraryLayout'].startswith("PAIRED"):
+        if len(fastqFiles) == 2:
+            item = ":".join(sorted(fastqFiles)[:2])
+        else:
+            comment = "for PAIRED library %s, number of files was %s, expected 2: %s"%(sra, len(fastqFiles), str(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            if len(fastqFiles) == 1:
+                item = fastqFiles[0] # interpret as single-end, perhaps an SRA metadata mistake
+                comment = "interpret library %s as single-end"%sra
+                details['problem'].append(comment)
+                LOG.write(comment+"\n")
+    if not item: # library layout single or failed above
+        if len(fastqFiles) == 1:
+            item = fastqFiles[0]
+        elif len(fastqFiles) > 1:
+            subprocess.call("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
+            item = sra+".fastq"
+            comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+        if not item:
+            comment = "for %s no fastq file found"%sra
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            # failed on that sra
+   
+    platform = None
+    if run_info["Platform"] == "ILLUMINA":
+        platform = "illumina"
+    elif run_info["Platform"] == "ION_TORRENT":
+        platform = "iontorrent"
+    elif run_info["Platform"] == "PACBIO_SMRT":
+        platform = "pacbio"
+    elif run_info["Platform"] == "OXFORD_NANOPORE":
+        platform = "nanopore"
+    if not platform:
+        ids, avg_length = sampleReads(fastqFiles[0], details)
+        platform = ["illumina", "pacbio"][avg_length > MAX_SHORT_READ_LENGTH]
+    registerReads(item, details, platform=platform)
     return
 
 def writeSpadesYamlFile(details):
@@ -1170,6 +1219,13 @@ def runSpades(details, args):
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
     contigsFile = "contigs.fasta"
+    spadesLogFile = args.prefix+"spades.log"
+    try:
+        shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
+        assemblyGraphFile = args.prefix+"assembly_graph.gfa"
+        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
+    except Exception as e:
+        LOG.write(str(e))
     if not os.path.exists(contigsFile):
         comment = "SPAdes failed to generate contigs file. Check "+spadesLogFile
         LOG.write(comment+"\n")
@@ -1177,13 +1233,6 @@ def runSpades(details, args):
         details["problem"].append(comment)
         return None
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
-    try:
-        spadesLogFile = args.prefix+"spades.log"
-        shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
-        assemblyGraphFile = args.prefix+"assembly_graph.gfa"
-        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
-    except Exception as e:
-        LOG.write(str(e))
     return contigsFile
 
 def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
@@ -1824,9 +1873,8 @@ def main():
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
-    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.json"), "w")
-    json.dump(details, fp, indent=2, sort_keys=True)
-    fp.close()
+    with open(os.path.join(SAVE_DIR, args.prefix+"run_details.json"), "w") as fp:
+        json.dump(details, fp, indent=2, sort_keys=True)
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
