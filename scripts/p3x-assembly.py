@@ -548,7 +548,7 @@ def categorize_anonymous_read_files(args, details):
         else:
             nonSraFiles.append(item)
     for sra in sraFiles:
-        processSraFastqFiles(sorted(sraFiles), details)
+        processSraFastqFiles(sorted(sraFiles[sra]), details)
 
     # now proceed with any non-sra files
     read_file_type = {}
@@ -767,20 +767,32 @@ def fetch_sra_files(sra_ids, details):
 
 def processSraFastqFiles(fastqFiles, details, run_info=None):
     """ manipulate multiple (or single) fastq files from one SRA runId and register reads """
+    comment = "processSraFastqFiles(%s)"%",".join(fastqFiles)
+    details['problem'].append(comment)
+    LOG.write(comment+"\n")
     item = None
-    m = re.match(r"([SED]RR\d+)", fastqFiles[0])
+    m = re.match(r"([SED]RR\d+)", os.path.basename(fastqFiles[0]))
     if not m:
         comment = "supposed sra fastq file does not start with [SED]RRnnnn"
         details['problem'].append(comment)
         LOG.write(comment+"\n")
         return
     sra = m.group(1)
+    for fq in fastqFiles:
+        if not os.path.basename(fq).startswith(sra):
+            comment = "Problem: not all fastqFiles passed to processSraFastqFiles() begin with %s: %s"%(sra, ",".join(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            return
     if not run_info:
         run_info = get_sra_runinfo(sra)
 
     if run_info['LibraryLayout'].startswith("PAIRED"):
         if len(fastqFiles) == 2:
             item = ":".join(sorted(fastqFiles)[:2])
+            comment = "runinfo[LibraryLayout] == PAIRED: item = %s"%item
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
         else:
             comment = "for PAIRED library %s, number of files was %s, expected 2: %s"%(sra, len(fastqFiles), str(fastqFiles))
             details['problem'].append(comment)
@@ -793,8 +805,18 @@ def processSraFastqFiles(fastqFiles, details, run_info=None):
     if not item: # library layout single or failed above
         if len(fastqFiles) == 1:
             item = fastqFiles[0]
+            comment = "runinfo[LibraryLayout] == %s: item = %s"%(run_info['LibraryLayout'], item)
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            
         elif len(fastqFiles) > 1:
-            subprocess.call("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
+            comment = "LibraryLayout=%s; Platform=%s: multiple files = %s"%(run_info['LibraryLayout'], run_info['Platform'], ",".join(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+
+            concatenate_command = "cat %s > %s/%s.fastq"%(" ".join(fastqFiles), WORK_DIR, sra)
+            LOG.write("concatenate command:"+concatenate_command+"\n")
+            subprocess.call(concatenate_command, shell=True)
             item = sra+".fastq"
             comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
             details['problem'].append(comment)
