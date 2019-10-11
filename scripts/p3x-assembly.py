@@ -1235,22 +1235,23 @@ def runSpades(details, args):
         details['problem'].append(comment)
         #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
         kdirs = glob.glob("K*")
-        knums=[]
-        for kdir in kdirs:
-            m = re.match("K(\d+)$", kdir)
-            if m:
-                k = int(m.group(1))
-                knums.append(k)
-        knums = sorted(knums) 
-        next_to_last_k = knums[-1]
-        kstr = str(knums[0])
-        for k in knums[1:-1]:
-            kstr += ","+str(k)
-        command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
-        LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
+        if len(kdirs) > 1:
+            knums=[]
+            for kdir in kdirs:
+                m = re.match("K(\d+)$", kdir)
+                if m:
+                    k = int(m.group(1))
+                    knums.append(k)
+            knums = sorted(knums) 
+            next_to_last_k = knums[-1]
+            kstr = str(knums[0])
+            for k in knums[1:-1]:
+                kstr += ","+str(k)
+            command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
+            LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
 
-        with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-            return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+            with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+                return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
             LOG.write("return code = %d\n"%return_code)
 
     spadesEndTime = time()
