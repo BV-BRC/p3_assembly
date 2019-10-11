@@ -725,16 +725,21 @@ def fetch_one_sra(sra, run_info=None, log=sys.stderr):
     """
     if not run_info:
         run_info = get_sra_runinfo(sra, log)
-    programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
+
+    command = ["prefetch", sra]
+    log.write("command = "+" ".join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stderr=log)
+    log.write("return_code = %d\n"%(return_code))
+
+    command = ["fasterq-dump", "--split-files", sra] # but not appropriate for pacbio or nanopore
     if run_info['Platform'].startswith("PACBIO") or run_info['Platform'].startswith("OXFORD_NANOPORE"):
-        programToUse = 'fastq-dump'
+        command = ['fastq-dump', sra]
     stime = time()
-    command = [programToUse, "--split-files", sra]
     log.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=log)
     log.write("return_code = %d\n"%(return_code))
     if return_code != 0:
-        log.write("Problem, %s return code was %d\n"%(programToUse, return_code))
+        log.write("Problem, return code was %d\n"%(return_code))
 
         log.write("Try one more time.\n")
         return_code = subprocess.call(command, shell=False, stderr=LOG)
@@ -1223,6 +1228,31 @@ def runSpades(details, args):
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
 
+    contigsFile = "contigs.fasta"
+    if return_code and not os.path.exists(contigsFile):
+        comment = "spades return code = %d, see if we can restart"%return_code
+        LOG.write(comment+"\n")
+        details['problem'].append(comment)
+        #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
+        kdirs = glob.glob("K*")
+        knums=[]
+        for kdir in kdirs:
+            m = re.match("K(\d+)$", kdir)
+            if m:
+                k = int(m.group(1))
+                knums.append(k)
+        knums = sorted(knums) 
+        next_to_last_k = knums[-1]
+        kstr = str(knums[0])
+        for k in knums[1:-1]:
+            kstr += ","+str(k)
+        command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
+        LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
+
+        with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+            return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+            LOG.write("return code = %d\n"%return_code)
+
     spadesEndTime = time()
     elapsedTime = spadesEndTime - spadesStartTime
     elapsedHumanReadable = ""
@@ -1240,7 +1270,6 @@ def runSpades(details, args):
         }
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
-    contigsFile = "contigs.fasta"
     spadesLogFile = args.prefix+"spades.log"
     try:
         shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
@@ -1348,7 +1377,6 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
     LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
-    LOG.write("racon return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
         return None
     raconContigSize = os.path.getsize(raconContigs)
@@ -1430,12 +1458,11 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     if return_code != 0:
         return None
     pilonContigs = pilonPrefix+".fasta"
-    numChanges = 0
+    details['pilon_changes'] = 0
     with open(pilonContigs.replace(".fasta", ".changes")) as CHANGES:
-        numChanges = len(CHANGES.read().splitlines())
-    LOG.write("Number of changes made by pilon was %d\n"%numChanges)
+        details['pilon_changes'] = len(CHANGES.read().splitlines())
 
-    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, numChanges)
+    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, details['pilon_changes'])
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     return pilonContigs 
@@ -1855,32 +1882,31 @@ def main():
 
     if contigs and os.path.getsize(contigs):
         # now run racon with each long-read file
-        for i in range(0, args.racon_iterations):
-            for longReadFile in details['reads']:
-                if details['reads'][longReadFile]['length_class'] == 'long':
+        for longReadFile in details['reads']:
+            if details['reads'][longReadFile]['length_class'] == 'long':
+                for i in range(0, args.racon_iterations):
                     LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
                     raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
                     if raconContigFile is not None:
                         contigs = raconContigFile
                     else:
-                        break
+                        break # break out of iterating racon_iterations, go to next long-read file if any
         
     if contigs and os.path.getsize(contigs):
         # now run pilon with each short-read file
-        for iteration in range(0, args.pilon_iterations):
-            numChanges = 0
-            for shortReadFastq in details['reads']:
-                if 'superceded_by' in details['reads'][shortReadFastq]:
-                    continue
-                if details['reads'][shortReadFastq]['length_class'] == 'short':
+        for shortReadFastq in details['reads']:
+            if 'superceded_by' in details['reads'][shortReadFastq]:
+                continue # may have been superceded by trimmed version of those reads
+            if details['reads'][shortReadFastq]['length_class'] == 'short':
+                for iteration in range(0, args.pilon_iterations):
                     LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, shortReadFastq, args.pilon_jar, args.threads, iteration))
                     pilonContigFile = runPilon(contigs, shortReadFastq, details, args.pilon_jar, threads=args.threads)
                     if pilonContigFile is not None:
                         contigs = pilonContigFile
                     else:
                         break
-            if not numChanges:
-                break
+                    if details['pilon_changes'] == 0:
+                        break
         
     if contigs and os.path.getsize(contigs):
         filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
