@@ -720,16 +720,17 @@ def get_sra_runinfo(run_accession, log=None):
             runinfo['LibraryLayout'] = 'PAIRED'
     return runinfo
 
-def fetch_one_sra(sra, run_info=None, log=sys.stderr):
+def fetch_one_sra(sra, run_info=None, log=sys.stderr, usePrefetch=False):
     """ requires run_info to know which program to use
     """
     if not run_info:
         run_info = get_sra_runinfo(sra, log)
 
-    command = ["prefetch", sra]
-    log.write("command = "+" ".join(command)+"\n")
-    return_code = subprocess.call(command, shell=False, stderr=log)
-    log.write("return_code = %d\n"%(return_code))
+    if usePrefetch:
+        command = ["prefetch", sra]
+        log.write("command = "+" ".join(command)+"\n")
+        return_code = subprocess.call(command, shell=False, stderr=log)
+        log.write("return_code = %d\n"%(return_code))
 
     command = ["fasterq-dump", "--split-files", sra] # but not appropriate for pacbio or nanopore
     if run_info['Platform'].startswith("PACBIO") or run_info['Platform'].startswith("OXFORD_NANOPORE"):
