@@ -54,9 +54,10 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     readStruct = {}
     readStruct["file"] = []
     #readStruct["path"] = []
-    readStruct["problems"] = []
+    readStruct["problem"] = []
     readStruct["layout"] = 'na'
     readStruct["platform"] = 'na'
+    readStruct['length_class'] = 'na'
     if ":" in reads or "%" in reads:
         if ":" in reads:
             delim = ["%", ":"][":" in reads] # ":" if it is, else "%"
@@ -134,6 +135,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
     return registeredName
 
 def parseJsonParameters(args):
+    """ Not fully implemented: should read assembly2 service json file """
     if not os.path.exists(args.params_json):
         raise Exception("cannot find json parameters file %s\n"%args.params_json)
     LOG.write("parseJsonParameters() time=%d\n"%time())
@@ -148,9 +150,6 @@ def parseJsonParameters(args):
             for pe in data["single_end_libs"]:
                 if pe["platform"] == 'illumina':
                     pass
-        if "srr_ids" in data:
-            if not args.sra:
-                pass
     return
 
 def studyPairedReads(item, details):
@@ -159,10 +158,6 @@ def studyPairedReads(item, details):
     """
     func_start = time()
     LOG.write("studyPairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details["reads"]:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'paired-end'
     details['reads'][item]['avg_len'] = 0
     details['reads'][item]['length_class'] = 'na'
@@ -207,9 +202,9 @@ def studyPairedReads(item, details):
                 sample_read_id = read_id_1
             if not read_id_1 == read_id_2:
                 diff = findSingleDifference(read_id_1, read_id_2)
-                if diff == None or sorted(diff) != ('1', '2'):
+                if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
                     read_ids_paired = False
-                    details['reads'][item]["problems"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
+                    details['reads'][item]["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
         elif i % 4 == 1:
             seqLen1 = len(line1)-1
             seqLen2 = len(line2)-1
@@ -219,7 +214,7 @@ def studyPairedReads(item, details):
                     readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
                     seqQualLenMatch = False
                     comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
-                    details['reads'][item]["problems"].append(comment)
+                    details['reads'][item]["problem"].append(comment)
                     LOG.write(comment+"\n")
             totalReadLength += seqLen1 + seqLen2
             maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
@@ -252,13 +247,8 @@ def studyPairedReads(item, details):
 def studySingleReads(item, details):
     func_start = time()
     LOG.write("studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
-    if "reads" not in details:
-        details["reads"] = {}
-    if item not in details['reads']:
-        details["reads"][item] = {}
     details['reads'][item]['layout'] = 'single-end'
     details['reads'][item]['num_reads'] = 0
-    details['reads'][item]['problems'] = []
     if item.endswith("gz"):
         F = gzip.open(item)
     else:
@@ -290,7 +280,7 @@ def studySingleReads(item, details):
             if interleaved and i % 8 == 0 and prev_read_id: # at every other sample ID check for matching prev, indicates interleaved
                 if prev_read_id != sample_read_id:
                     diff = findSingleDifference(prev_read_id, sample_read_id)
-                    if diff == None or sorted(diff) != ('1', '2'):
+                    if diff == None or sorted(prev_read_id[diff[0]:diff[1]], sample_read_id[diff[0]:diff[1]]) != ('1', '2'):
                         interleaved=False
 
         elif i % 4 == 1:
@@ -300,7 +290,7 @@ def studySingleReads(item, details):
             if seqQualLenMatch and (seqLen != qualLen):
                 seqQualLenMatch = False
                 comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                details['reads'][item]["problems"].append(comment)
+                details['reads'][item]["problem"].append(comment)
                 LOG.write(comment+"\n")
             totalReadLength += seqLen
             maxReadLength = max(maxReadLength, seqLen) 
@@ -524,25 +514,48 @@ def sampleReads(filename, details=None):
     return read_id_sample, avg_read_length
 
 def findSingleDifference(s1, s2):
-# if two strings differ in only a single position, return the chars at that pos, else return None
+# if two strings differ in only a single contiguous region, return the start and end of region, else return None
     if len(s1) != len(s2):
         return None
-    retval = None
-    for c1, c2 in zip(s1, s2):
+    start = None
+    end = None
+    for i, (c1, c2) in enumerate(zip(s1, s2)):
         if c1 != c2:
-            if retval:
+            if end:
                 return None
-            retval = (c1, c2)
-    return retval
+            if not start:
+                start = i
+        elif start and not end:
+           end = i
+    if start and not end:
+        end = i+1
+    return (start, end)
 
 def categorize_anonymous_read_files(args, details):
     LOG.write("categorize_anonymous_read_files() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("  files=%s\n"%("\t".join(args.anonymous_reads)))
+
+    nonSraFiles = []
+    sraFiles = {}
+    # first pull out any SRA files for special treatment
+    for item in args.anonymous_reads:
+        m = re.match("([SED]RR\d+)", item)
+        if m:
+            sra = m.group(1)
+            if sra not in sraFiles:
+                sraFiles[sra] = [] 
+            sraFiles[sra].append(item)
+        else:
+            nonSraFiles.append(item)
+    for sra in sraFiles:
+        processSraFastqFiles(sorted(sraFiles[sra]), details)
+
+    # now proceed with any non-sra files
     read_file_type = {}
     read_id_sample = {}
     singleFiles = []
     pairedFiles = []
-    for item in args.anonymous_reads:
+    for item in nonSraFiles:
         if ":" in item or "%" in item:
             pairedFiles.append(item)
         else:
@@ -560,12 +573,15 @@ def categorize_anonymous_read_files(args, details):
         for filename2 in singleFiles[i+1:]:
             singleDiff = findSingleDifference(filename1, filename2)
 # singleDiff will be not None if the strings match at all but one character (presumably '1' vs '2')
-            if singleDiff:
-                intDiffs = (int(singleDiff[0]), int(singleDiff[1]))
+            if singleDiff and singleDiff[0] > 0 and singleDiff[1]-singleDiff[0] == 1:
+                charBefore = filename1[singleDiff[0]-1]
+                if charBefore.isdigit():
+                    continue # changes in multi-digit numbers are not indicative of paired reads
+                diffChars = (filename1[singleDiff[0]], filename2[singleDiff[0]])
                 pair = None
-                if intDiffs[0] == 1 and intDiffs[1] == 2:
+                if diffChars[0] == '1' and diffChars[1] == '2':
                     pair = (filename1, filename2)
-                elif intDiffs[1] == 1 and intDiffs[0] == 2:
+                elif diffChars[1] == '1' and diffChars[0] == '2':
                     pair = (filename2, filename1)
                 if pair:
                     comment = "candidate paired files: %s  %s"%pair
@@ -582,7 +598,6 @@ def categorize_anonymous_read_files(args, details):
     valid_pairs = set()
     valid_singles = set()
     for item in pairedFiles:
-        print item
         if ":" in item:
             filename1, filename2 = item.split(":") 
         elif "%" in item:
@@ -617,7 +632,11 @@ def categorize_anonymous_read_files(args, details):
         # test if read IDs match between files
         ids_paired = True
         for idpair in zip(read_id_sample[filename1], read_id_sample[filename2]):
-            if idpair[0] != idpair[1] and not findSingleDifference(idpair[0], idpair[1]):
+            if idpair[0] == idpair[1]:
+                continue
+            diff = findSingleDifference(idpair[0], idpair[1])
+            # diff reports start and end of contiguous region of different characters (if only one)
+            if not diff or sorted(idpair[0][diff[0]:diff[1]], idpair[1][diff[0]:diff[1]]) != ('1', '2'):
                 ids_paired = False
                 comment = "Read IDs do not match for %s(%s) vs %s(%s)"%(filename1, idpair[0], filename2, idpair[1])
                 LOG.write(comment+"\n")
@@ -701,21 +720,27 @@ def get_sra_runinfo(run_accession, log=None):
             runinfo['LibraryLayout'] = 'PAIRED'
     return runinfo
 
-def fetch_one_sra(sra, run_info=None, log=sys.stderr):
+def fetch_one_sra(sra, run_info=None, log=sys.stderr, usePrefetch=False):
     """ requires run_info to know which program to use
     """
     if not run_info:
         run_info = get_sra_runinfo(sra, log)
-    programToUse = "fasterq-dump" # but not appropriate for pacbio or nanopore
+
+    if usePrefetch:
+        command = ["prefetch", sra]
+        log.write("command = "+" ".join(command)+"\n")
+        return_code = subprocess.call(command, shell=False, stderr=log)
+        log.write("return_code = %d\n"%(return_code))
+
+    command = ["fasterq-dump", "--split-files", sra] # but not appropriate for pacbio or nanopore
     if run_info['Platform'].startswith("PACBIO") or run_info['Platform'].startswith("OXFORD_NANOPORE"):
-        programToUse = 'fastq-dump'
+        command = ['fastq-dump', sra]
     stime = time()
-    command = [programToUse, "--split-files", sra]
     log.write("command = "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=log)
     log.write("return_code = %d\n"%(return_code))
     if return_code != 0:
-        log.write("Problem, %s return code was %d\n"%(programToUse, return_code))
+        log.write("Problem, return code was %d\n"%(return_code))
 
         log.write("Try one more time.\n")
         return_code = subprocess.call(command, shell=False, stderr=LOG)
@@ -743,43 +768,84 @@ def fetch_sra_files(sra_ids, details):
         fetch_one_sra(sraFull, run_info=runinfo, log=LOG)
         fastqFiles = glob.glob(sra+"*fastq")
         LOG.write("Fastq files from sra: %s\n"%str(fastqFiles))
-        item = None
-        if runinfo['LibraryLayout'].startswith("PAIRED"):
-            if len(fastqFiles) == 2:
-                item = ":".join(sorted(fastqFiles)[:2])
-            else:
-                comment = "for PAIRED library %s, number of files was %s, expected 2"%(sra, len(fastqFiles))
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-        if not item: # library layout single or failed above
-            if len(fastqFiles) == 1:
-                item = fastqFiles[0]
-            if len(fastqFiles) > 1:
-                subprocess.call("cat %s*fastq > %s.fastq"%(sra, sra), shell=True)
-                item = sra+".fastq"
-                comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-            if not item:
-                comment = "for %s no fastq file found"%sra
-                details['problem'].append(comment)
-                LOG.write(comment+"\n")
-                continue # failed on that sra
-   
-        platform = None
-        if runinfo["Platform"] == "ILLUMINA":
-            platform = "illumina"
-        elif runinfo["Platform"] == "ION_TORRENT":
-            platform = "iontorrent"
-        elif runinfo["Platform"] == "PACBIO_SMRT":
-            platform = "pacbio"
-        elif runinfo["Platform"] == "OXFORD_NANOPORE":
-            platform = "nanopore"
-        if not platform:
-            ids, avg_length = sampleReads(fastqFiles[0], details)
-            platform = ["illumina", "pacbio"][avg_length > MAX_SHORT_READ_LENGTH]
-        registerReads(item, details, platform=platform)
+        processSraFastqFiles(fastqFiles, details, runinfo)
+    return
 
+def processSraFastqFiles(fastqFiles, details, run_info=None):
+    """ manipulate multiple (or single) fastq files from one SRA runId and register reads """
+    comment = "processSraFastqFiles(%s)"%",".join(fastqFiles)
+    details['problem'].append(comment)
+    LOG.write(comment+"\n")
+    item = None
+    m = re.match(r"([SED]RR\d+)", os.path.basename(fastqFiles[0]))
+    if not m:
+        comment = "supposed sra fastq file does not start with [SED]RRnnnn"
+        details['problem'].append(comment)
+        LOG.write(comment+"\n")
+        return
+    sra = m.group(1)
+    for fq in fastqFiles:
+        if not os.path.basename(fq).startswith(sra):
+            comment = "Problem: not all fastqFiles passed to processSraFastqFiles() begin with %s: %s"%(sra, ",".join(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            return
+    if not run_info:
+        run_info = get_sra_runinfo(sra)
+
+    if run_info['LibraryLayout'].startswith("PAIRED"):
+        if len(fastqFiles) == 2:
+            item = ":".join(sorted(fastqFiles)[:2])
+            comment = "runinfo[LibraryLayout] == PAIRED: item = %s"%item
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+        else:
+            comment = "for PAIRED library %s, number of files was %s, expected 2: %s"%(sra, len(fastqFiles), str(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            if len(fastqFiles) == 1:
+                item = fastqFiles[0] # interpret as single-end, perhaps an SRA metadata mistake
+                comment = "interpret library %s as single-end"%sra
+                details['problem'].append(comment)
+                LOG.write(comment+"\n")
+    if not item: # library layout single or failed above
+        if len(fastqFiles) == 1:
+            item = fastqFiles[0]
+            comment = "runinfo[LibraryLayout] == %s: item = %s"%(run_info['LibraryLayout'], item)
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            
+        elif len(fastqFiles) > 1:
+            comment = "LibraryLayout=%s; Platform=%s: multiple files = %s"%(run_info['LibraryLayout'], run_info['Platform'], ",".join(fastqFiles))
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+
+            concatenate_command = "cat %s > %s/%s.fastq"%(" ".join(fastqFiles), WORK_DIR, sra)
+            LOG.write("concatenate command:"+concatenate_command+"\n")
+            subprocess.call(concatenate_command, shell=True)
+            item = sra+".fastq"
+            comment = "for library %s, list of files was %s, concatenated to %s"%(sra, str(fastqFiles), item)
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+        if not item:
+            comment = "for %s no fastq file found"%sra
+            details['problem'].append(comment)
+            LOG.write(comment+"\n")
+            # failed on that sra
+   
+    platform = None
+    if run_info["Platform"] == "ILLUMINA":
+        platform = "illumina"
+    elif run_info["Platform"] == "ION_TORRENT":
+        platform = "iontorrent"
+    elif run_info["Platform"] == "PACBIO_SMRT":
+        platform = "pacbio"
+    elif run_info["Platform"] == "OXFORD_NANOPORE":
+        platform = "nanopore"
+    if not platform:
+        ids, avg_length = sampleReads(fastqFiles[0], details)
+        platform = ["illumina", "pacbio"][avg_length > MAX_SHORT_READ_LENGTH]
+    registerReads(item, details, platform=platform)
     return
 
 def writeSpadesYamlFile(details):
@@ -908,86 +974,115 @@ def runQuast(contigsFile, args, details):
         details["quast_txt"] = args.prefix+"quast_report.txt"
         details["quast_html"] = args.prefix+"quast_report.html"
 
-def filterContigsByMinLength(inputFile, args, details, shortReadDepth=None, longReadDepth=None):
+def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
     Write only sequences at or above min_length to output file.
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    LOG.write("filterContigsByMinLength(%s) \n"%(inputFile))
+    LOG.write("filterContigsByMinLength(%s) \n"%(inputContigs))
+    shortReadDepth = None
+    longReadDepth = None
+    bamFiles = []
+    for reads in details['reads']:
+        if details['reads'][reads]['length_class'] == 'short':
+            bam = runBowtie(inputContigs, reads, details, threads=threads, outformat='bam')
+            if bam:
+                bamFiles.append(bam)
+    if bamFiles:
+        shortReadDepth = calcReadDepth(bamFiles)
+    bamFiles = []
+    for reads in details['reads']:
+        if details['reads'][reads]['length_class'] == 'long':
+            bam = runMinimap(inputContigs, reads, details, threads=threads, outformat='bam')
+            if bam:
+                bamFiles.append(bam)
+    if bamFiles:
+        longReadDepth = calcReadDepth(bamFiles)
+    report = []
+    report.append("min_contig_length = %d"%min_contig_length)
+    report.append("min_contig_coverage = %.1f"%min_contig_coverage)
+    bad_contigs = []
+    details['circular_contigs'] = []
+    no_coverage_available = False
     if not shortReadDepth and not longReadDepth:
-        LOG.write("Neither shortReadDepth nor longReadDepth provided. Quiting.\n")
-        return None
-    suboptimalReads = ""
-    outputFile = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputFile)
-    LOG.write("writing filtered contigs to %s\n"%outputFile)
-    with open(inputFile) as IN:
-        with open(outputFile, 'w') as OUT:
-            shortCovTags = ['coverage', 'normalized_cov']
-            longCovTags = ['coverage_longread', 'normalized_cov_longread']
+        no_coverage_available = True
+        comment = "No read coverage information available"
+        LOG.write(comment+"\n")
+        report.append(comment)
+    else:
+        if shortReadDepth:
+            comment = "Short read coverage information available"
+            LOG.write(comment+"\n")
+            report.append(comment)
+        if longReadDepth:
+            comment = "Long read coverage information available"
+            LOG.write(comment+"\n")
+            report.append(comment)
+    suboptimalContigs = ""
+    num_good_contigs = num_bad_contigs = 0
+    outputContigs = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputContigs)
+    LOG.write("writing filtered contigs to %s\n"%outputContigs)
+    with open(inputContigs) as IN:
+        with open(outputContigs, 'w') as OUT:
             seqId=None
             seq = ""
             contigIndex = 1
-            contigCoverage = 0
-            for line in IN:
+            line = "1"
+            while line:
+                line = IN.readline()
                 m = re.match(r">(\S+)", line)
-                if m:
+                if m or not line: 
                     if seq:
-                        contigId = ">"+args.prefix+"contig_%d length %5d"%(contigIndex, len(seq))
+                        contigId = ">"+prefix+"contig_%d"%contigIndex
+                        contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
                         contigCoverage = 0
                         if shortReadDepth and seqId in shortReadDepth:
                             meanDepth, normalizedDepth = shortReadDepth[seqId]
-                            contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
+                            contigInfo += " coverage %.01f normalized_cov %.2f"%(meanDepth, normalizedDepth)
                             contigCoverage = meanDepth
                         if longReadDepth and seqId in longReadDepth:
                             meanDepth, normalizedDepth = longReadDepth[seqId]
-                            contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
+                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(meanDepth, normalizedDepth)
                             contigCoverage = max(meanDepth, contigCoverage)
                         if "contigCircular" in details and contigIndex in details["contigCircular"]:
-                            contigId += " circular=true"
-                        if len(seq) >= args.min_contig_length and contigCoverage >= args.min_contig_coverage:
-                            OUT.write(contigId+"\n")
+                            contigInfo += " circular=true"
+                            details['circular_contigs'].append(contigId+contigInfo)
+                        if len(seq) >= min_contig_length and (no_coverage_available or contigCoverage >= min_contig_coverage):
+                            OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
+                            num_good_contigs += 1
                         else:
-                            suboptimalReads += contigId+"\n"+seq+"\n"
-                    seq = ""
-                    seqId = m.group(1)
-                else:
+                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
+                            bad_contigs.append(contigId+contigInfo)
+                            num_bad_contigs += 1
+                        seq = ""
+                    if m:
+                        seqId = m.group(1)
+                elif line:
                     seq += line.rstrip()
-            if seq:
-                contigId = ">"+args.prefix+"contig_%d length %5d"%(contigIndex, len(seq))
-                contigCoverage = 0
-                if shortReadDepth and seqId in shortReadDepth:
-                    meanDepth, normalizedDepth = shortReadDepth[seqId]
-                    contigId += " %s %.01f %s %.2f"%(shortCovTags[0], meanDepth, shortCovTags[1], normalizedDepth)
-                    contigCoverage = meanDepth
-                if longReadDepth and seqId in longReadDepth:
-                    meanDepth, normalizedDepth = longReadDepth[seqId]
-                    contigId += " %s %.01f %s %.2f"%(longCovTags[0], meanDepth, longCovTags[1], normalizedDepth)
-                    contigCoverage = max(meanDepth, contigCoverage)
-                if "contigCircular" in details and contigIndex in details["contigCircular"]:
-                    contigId += " circular=true"
-                if len(seq) >= args.min_contig_length and contigCoverage >= args.min_contig_coverage:
-                    OUT.write(contigId+"\n")
-                    for i in range(0, len(seq), 60):
-                        OUT.write(seq[i:i+60]+"\n")
-                else:
-                    suboptimalReads += contigId+"\n"+seq+"\n"
-    if suboptimalReads:
-        suboptimalReadsFile = re.sub(r"\..*", "_short_or_low_coverage.fasta", outputFile)
-        with open(suboptimalReadsFile, "w") as SUBOPT:
-            SUBOPT.write(suboptimalReads)
-    if os.path.getsize(outputFile) < 10:
-        LOG.write("failed to generate outputFile, return None\n")
+    report.append("Number of contigs above thresholds: %d"%num_good_contigs)
+    report.append("Number of contigs below thresholds: %d"%num_bad_contigs)
+    if suboptimalContigs:
+        details['bad_contigs'] = bad_contigs
+        suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
+        report.append("bad contigs written to "+suboptimalContigsFile)
+        details['suboptimal_contigs'] = suboptimalContigsFile
+        suboptimalContigsFile = os.path.join(SAVE_DIR, suboptimalContigsFile)
+        with open(suboptimalContigsFile, "w") as SUBOPT:
+            SUBOPT.write(suboptimalContigs)
+    if os.path.getsize(outputContigs) < 10:
+        LOG.write("failed to generate outputContigs, return None\n")
         return None
-    comment = "trimContigsByMinLength, input %s, output %s"%(inputFile, outputFile)
+    details['contig_filtering'] = report
+    comment = "trimContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
-    return outputFile
+    return outputContigs
 
 def runBandage(gfaFile, details):
-    imageFormat = ".jpg"
+    imageFormat = ".svg"
     retval = None
     if os.path.exists(gfaFile):
         plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
@@ -1072,8 +1167,10 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         shutil.move("unicycler.log", os.path.join(SAVE_DIR, unicyclerLogFile))
 
     if not os.path.exists("assembly.fasta"):
-        LOG.write("unicycler failed to generate assembly file.\n")
-        details["problem"].append("unicycler failed to generate contigs file")
+        comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
         return None
     details["contigCircular"] = []
     with open("assembly.fasta") as F:
@@ -1087,10 +1184,12 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     assemblyGraphFile = prefix+"assembly_graph.gfa"
     shutil.move("assembly.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
 
-    shutil.move("assembly.fasta", "contigs.fasta") #rename to canonical name
-    return "contigs.fasta"
+    contigsFile = "contigs.fasta"
+    shutil.move("assembly.fasta", contigsFile) #rename to canonical name
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    return contigsFile
 
-def runSpades(args, details):
+def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
 
@@ -1130,6 +1229,32 @@ def runSpades(args, details):
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
 
+    contigsFile = "contigs.fasta"
+    if return_code and not os.path.exists(contigsFile):
+        comment = "spades return code = %d, see if we can restart"%return_code
+        LOG.write(comment+"\n")
+        details['problem'].append(comment)
+        #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
+        kdirs = glob.glob("K*")
+        if len(kdirs) > 1:
+            knums=[]
+            for kdir in kdirs:
+                m = re.match("K(\d+)$", kdir)
+                if m:
+                    k = int(m.group(1))
+                    knums.append(k)
+            knums = sorted(knums) 
+            next_to_last_k = knums[-1]
+            kstr = str(knums[0])
+            for k in knums[1:-1]:
+                kstr += ","+str(k)
+            command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
+            LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
+
+            with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+                return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+            LOG.write("return code = %d\n"%return_code)
+
     spadesEndTime = time()
     elapsedTime = spadesEndTime - spadesStartTime
     elapsedHumanReadable = ""
@@ -1147,18 +1272,20 @@ def runSpades(args, details):
         }
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
-    if not os.path.exists("contigs.fasta"):
-        LOG.write("spades failed to generate contigs.fasta.\n")
-        details["problem"].append("spades failed to generate contigs.fasta")
-        return None
+    spadesLogFile = args.prefix+"spades.log"
     try:
-        spadesLogFile = args.prefix+"spades.log"
         shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
         assemblyGraphFile = args.prefix+"assembly_graph.gfa"
         shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
     except Exception as e:
         LOG.write(str(e))
-    contigsFile = "contigs.fasta"
+    if not os.path.exists(contigsFile):
+        comment = "SPAdes failed to generate contigs file. Check "+spadesLogFile
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
+        return None
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
 def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
@@ -1212,7 +1339,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     #os.remove(samFile) #save a little space
@@ -1225,7 +1352,7 @@ def convertSamToBam(samFile, details, threads=1):
     if return_code != 0:
         comment = "samtools sort returned %d"%return_code
         LOG.write(comment+"\n")
-        details["problems"].append(comment)
+        details["problem"].append(comment)
         return None
 
     command = ["samtools", "index", bamFileSorted]
@@ -1252,7 +1379,6 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
     LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
-    LOG.write("racon return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
         return None
     raconContigSize = os.path.getsize(raconContigs)
@@ -1334,12 +1460,11 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     if return_code != 0:
         return None
     pilonContigs = pilonPrefix+".fasta"
-    numChanges = 0
+    details['pilon_changes'] = 0
     with open(pilonContigs.replace(".fasta", ".changes")) as CHANGES:
-        numChanges = len(CHANGES.read().splitlines())
-    LOG.write("Number of changes made by pilon was %d\n"%numChanges)
+        details['pilon_changes'] = len(CHANGES.read().splitlines())
 
-    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, numChanges)
+    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, details['pilon_changes'])
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     return pilonContigs 
@@ -1486,21 +1611,26 @@ usage: canu [-version] [-citation] \
         shutil.move("canu.report", os.path.join(SAVE_DIR, prefix+"canu_report.txt"))
     
     if not os.path.exists("canu.contigs.fasta"):
-        LOG.write("canu failed to generate contigs file.\n")
-        details["problem"].append("canu failed to generate contigs file")
+        comment = "Canu failed to generate contigs file. Check "+prefix+"canu_report.txt"
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
         return None
     # rename to canonical contigs.fasta
-    shutil.move("canu.contigs.fasta", "contigs.fasta")
+    contigsFile = "contigs.fasta"
+    shutil.move("canu.contigs.fasta", contigsFile)
     shutil.move("canu.contigs.gfa", os.path.join(SAVE_DIR, prefix+"assembly_graph.gfa"))
-    return "contigs.fasta"
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    return contigsFile
 
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
-    HTML.write("<head><style>\n.a { text-indent: 50px }\n")
-    HTML.write(".b {text-indent: 75px }\n")
-    HTML.write("</style></head>")
+    HTML.write("<head><style>\n.a { left-margin: 50px }\n")
+    HTML.write(".b {left-margin: 75px }\n")
+    HTML.write("</style></head>\n")
     HTML.write("<h1>Genome Assembly Report</h1>\n")
+    HTML.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
 
     HTML.write("<h3>Input reads:</h3>\n")
     for item in details['reads']:
@@ -1508,21 +1638,22 @@ def write_html_report(htmlFile, details):
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
         for key in sorted(details['reads'][item]):
-            if key == 'problems':
+            if key == 'problem':
                 continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
-        if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+        if "problem" in details['reads'][item] and details['reads'][item]['problem']:
             HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-            for prob in details['reads'][item]['problems']:
+            for prob in details['reads'][item]['problem']:
                 HTML.write("<li>"+prob+"\n")
             HTML.write("</ul></div>\n")
     
     if details["pre-assembly transformation"]:
         HTML.write("<h3>Pre-Assembly Transformations</h3>\n<div class='a'>\n")
+        HTML.write("<ul>\n")
         for line in details["pre-assembly transformation"]:
-            HTML.write("<p>"+line+"\n")
-        HTML.write("</div>\n")
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
 
     if "trim report" in details:
         HTML.write("<h3>Trimming Report</h3>\n<div class='a'>\n")
@@ -1540,13 +1671,13 @@ def write_html_report(htmlFile, details):
         for item in details['derived_reads']:
             HTML.write(item+"<table class='a'>")
             for key in sorted(details['reads'][item]):
-                if key == 'problems':
+                if key == 'problem':
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
-            if "problems" in details['reads'][item] and details['reads'][item]['problems']:
+            if "problem" in details['reads'][item] and details['reads'][item]['problem']:
                 HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-                for prob in details['reads'][item]['problems']:
+                for prob in details['reads'][item]['problem']:
                     HTML.write("<li>"+prob+"\n")
                 HTML.write("</ul></div>\n")
 
@@ -1571,17 +1702,48 @@ def write_html_report(htmlFile, details):
             HTML.write("\n</pre>\n")
     
     if details["post-assembly transformation"]:
-        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n")
-        for line in details["post-assembly transformation"]:
-            HTML.write("<p>"+line+"<br>\n")
+        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n<ul>\n")
+        HTML.write("<ul>\n")
+        for line in details['post-assembly transformation']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
+
+    if "circular_contigs" in details and details['circular_contigs']:
+        HTML.write("<h3>Circular Contigs</h3>\n<div class='a'>\n")
+        HTML.write("<b>As suggested by Unicycler</b>\n")
+        HTML.write("<ul>\n")
+        for line in details['circular_contigs']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul></div>\n")
+
+    if "contig_filtering" in details and details['contig_filtering']:
+        HTML.write("<h3>Contig Filtering</h3>\n<div class='a'>\n")
+        HTML.write("<ul>\n")
+        for line in details['contig_filtering']:
+            HTML.write("<li>"+line+"\n")
+        HTML.write("</ul>\n")
+
+        if "bad_contigs" in details and details["bad_contigs"]:
+            HTML.write("<b>Contigs Below Thresholds</b>\n")
+            if len(details["bad_contigs"]) > 10:
+                HTML.write("<b>Showing first 10 entries</b>\n")
+            HTML.write("<ul>\n")
+            for line in details['bad_contigs'][:10]:
+                HTML.write("<li>"+line+"\n")
+            HTML.write("</ul>\n")
         HTML.write("</div>\n")
 
     if "Bandage plot" in details:
-        path, imageFile = os.path.split(details["Bandage plot"])
-        HTML.write("<h3>Bandage Plot</h3>\n")
-        HTML.write("<div class='a'>")
-        HTML.write("<img src='%s'>\n"%imageFile)
-        HTML.write("</div>\n")
+        #path, imageFile = os.path.split(details["Bandage plot"])
+        if os.path.exists(details["Bandage plot"]):
+            svg_text = open(details["Bandage plot"]).read()
+            svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
+            HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write("<div class='a'>")
+            HTML.write(svg_text+"\n\n")
+            #HTML.write("<img src='%s'>\n"%imageFile)
+            HTML.write("</div>\n")
+    HTML.write("</html>\n")
     HTML.close()
 
 
@@ -1605,8 +1767,8 @@ def main():
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
-    parser.add_argument('--min_contig_length', default=300, help='save contigs of this length or longer', required=False)
-    parser.add_argument('--min_contig_coverage', default=5, help='save contigs of this coverage or deeper', required=False)
+    parser.add_argument('--min_contig_length', type=int, default=300, help='save contigs of this length or longer', required=False)
+    parser.add_argument('--min_contig_coverage', type=float, default=5, help='save contigs of this coverage or deeper', required=False)
     parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
@@ -1681,6 +1843,10 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore')
 
+    if args.fasta:
+        for item in args.fasta:
+            registerReads(item, details, platform = 'fasta')
+
     if args.sra:
         fetch_sra_files(args.sra, details)
 
@@ -1708,7 +1874,7 @@ def main():
             else:
                 args.recipe = "unicycler"
     if "spades" in args.recipe or args.recipe == "single-cell":
-        contigs = runSpades(args, details)
+        contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
     elif args.recipe == "canu":
@@ -1718,53 +1884,34 @@ def main():
 
     if contigs and os.path.getsize(contigs):
         # now run racon with each long-read file
-        for i in range(0, args.racon_iterations):
-            for longReadFile in details['reads']:
-                if details['reads'][longReadFile]['length_class'] == 'long':
+        for longReadFile in details['reads']:
+            if details['reads'][longReadFile]['length_class'] == 'long':
+                for i in range(0, args.racon_iterations):
                     LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
                     raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
                     if raconContigFile is not None:
                         contigs = raconContigFile
                     else:
-                        break
+                        break # break out of iterating racon_iterations, go to next long-read file if any
         
     if contigs and os.path.getsize(contigs):
         # now run pilon with each short-read file
-        for iteration in range(0, args.pilon_iterations):
-            numChanges = 0
-            for shortReadFastq in details['reads']:
-                if 'superceded_by' in details['reads'][shortReadFastq]:
-                    continue
-                if details['reads'][shortReadFastq]['length_class'] == 'short':
+        for shortReadFastq in details['reads']:
+            if 'superceded_by' in details['reads'][shortReadFastq]:
+                continue # may have been superceded by trimmed version of those reads
+            if details['reads'][shortReadFastq]['length_class'] == 'short':
+                for iteration in range(0, args.pilon_iterations):
                     LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, shortReadFastq, args.pilon_jar, args.threads, iteration))
                     pilonContigFile = runPilon(contigs, shortReadFastq, details, args.pilon_jar, threads=args.threads)
                     if pilonContigFile is not None:
                         contigs = pilonContigFile
                     else:
                         break
-            if not numChanges:
-                break
+                    if details['pilon_changes'] == 0:
+                        break
         
     if contigs and os.path.getsize(contigs):
-        shortReadDepth = {}
-        longReadDepth = {}
-        bamFiles = []
-        for reads in details['reads']:
-            if details['reads'][reads]['length_class'] == 'short':
-                bam = runBowtie(contigs, reads, details, threads=args.threads, outformat='bam')
-                if bam:
-                    bamFiles.append(bam)
-        if bamFiles:
-            shortReadDepth = calcReadDepth(bamFiles)
-        bamFiles = []
-        for reads in details['reads']:
-            if details['reads'][reads]['length_class'] == 'long':
-                bam = runMinimap(contigs, reads, details, threads=args.threads, outformat='bam')
-                if bam:
-                    bamFiles.append(bam)
-        if bamFiles:
-            longReadDepth = calcReadDepth(bamFiles)
-        filteredContigs = filterContigsByMinLength(contigs, args, details, shortReadDepth=shortReadDepth, longReadDepth=longReadDepth)
+        filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
         if filteredContigs:
             contigs = filteredContigs
     if contigs and os.path.getsize(contigs):
@@ -1776,15 +1923,14 @@ def main():
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
+    with open(os.path.join(SAVE_DIR, args.prefix+"run_details.json"), "w") as fp:
+        json.dump(details, fp, indent=2, sort_keys=True)
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - START_TIME)/3600))
     LOG.close()
-    fp = file(os.path.join(SAVE_DIR, args.prefix+"run_details.txt"), "w")
-    json.dump(details, fp, indent=2, sort_keys=True)
-    fp.close()
 
 
 if __name__ == "__main__":
