@@ -234,9 +234,9 @@ def studyPairedReads(item, details):
     details['reads'][item]['num_reads'] = readNumber
     details['reads'][item]['sample_read_id'] = sample_read_id 
 
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, details['reads'][item]['avg_len'])
-    details['reads'][item]['length_class'] = ["short", "long"][avgReadLength >= MAX_SHORT_READ_LENGTH]
-    if avgReadLength >= MAX_SHORT_READ_LENGTH:
+    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
+    if maxReadLength >= MAX_SHORT_READ_LENGTH:
         comment = "paired reads appear to be long, expected short: %s"%item
         LOG.write(comment+"\n")
         details['reads'][item]['problem'].append(comment)
@@ -310,8 +310,8 @@ def studySingleReads(item, details):
     details['reads'][item]['min_read_len'] = minReadLength
     details['reads'][item]['num_reads'] = readNumber
     details['reads'][item]['sample_read_id'] = sample_read_id 
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, avgReadLength)
-    details['reads'][item]['length_class'] = ["short", "long"][avgReadLength >= MAX_SHORT_READ_LENGTH]
+    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
     if interleaved:
         details['reads'][item]['interleaved'] = True
 
@@ -357,8 +357,8 @@ def studyFastaReads(item, details):
     details['reads'][item]['num_reads'] = readNumber
     details['reads'][item]['sample_read_id'] = sample_read_id 
     details['reads'][item]['platform'] = 'fasta'
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, avgReadLength)
-    details['reads'][item]['length_class'] = ["short", "long"][avgReadLength >= MAX_SHORT_READ_LENGTH]
+    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
     if item not in details['platform']['fasta']:
         details['platform']['fasta'].append(item)
 
@@ -366,7 +366,7 @@ def studyFastaReads(item, details):
     return
 
 
-def inferPlatform(read_id, avgReadLength):
+def inferPlatform(read_id, maxReadLength):
     """ 
     Analyze sample of text from read file and return one of:
     illumina, iontorrent, pacbio, nanopore, ...
@@ -375,7 +375,7 @@ def inferPlatform(read_id, avgReadLength):
     """
     if read_id.startswith(">"):
         return "fasta"
-    if avgReadLength < MAX_SHORT_READ_LENGTH:
+    if maxReadLength < MAX_SHORT_READ_LENGTH:
         # example illumina read id
         #@D00553R:173:HG53VBCXY:2:1101:1235:2074 1:N:0:ACAGTGAT
         parts = read_id.split(":")
