@@ -37,6 +37,7 @@ LOG = None # create a log file at start of main()
 START_TIME = None
 WORK_DIR = None
 SAVE_DIR = None
+DETAILS_DIR = None
 
 def registerReads(reads, details, platform=None, interleaved=False, supercedes=None):
     """
@@ -435,7 +436,7 @@ def trimGalore(details, threads=1):
                 LOG.write("re.findall for trim reports returned %s\n"%str(trimReports))
                 details["trim report"][reads]=[]
                 for f in trimReports:
-                    shutil.move(f, os.path.join(SAVE_DIR, os.path.basename(f)))
+                    shutil.move(f, os.path.join(DETAILS_DIR, os.path.basename(f)))
                     details["trim report"][reads].append(f)
             else:
                 command.append(reads)
@@ -462,7 +463,7 @@ def trimGalore(details, threads=1):
                 if trimReport:
                     trimReport = trimReport.group(1)
                     details["trim report"][reads]=trimReport
-                    shutil.move(trimReport, os.path.join(SAVE_DIR, os.path.basename(trimReport)))
+                    shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -969,10 +970,10 @@ def runQuast(contigsFile, args, details):
         return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
     if return_code == 0:
-        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(SAVE_DIR, args.prefix+"quast_report.html"))
-        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(SAVE_DIR, args.prefix+"quast_report.txt"))
-        details["quast_txt"] = args.prefix+"quast_report.txt"
-        details["quast_html"] = args.prefix+"quast_report.html"
+        shutil.move(os.path.join(quastDir, "report.html"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.txt"))
+        details["quast_txt"] = "details/"+args.prefix+"quast_report.txt"
+        details["quast_html"] = "details/"+args.prefix+"quast_report.html"
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
@@ -1069,7 +1070,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
         suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
         report.append("bad contigs written to "+suboptimalContigsFile)
         details['suboptimal_contigs'] = suboptimalContigsFile
-        suboptimalContigsFile = os.path.join(SAVE_DIR, suboptimalContigsFile)
+        suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
         with open(suboptimalContigsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalContigs)
     if os.path.getsize(outputContigs) < 10:
@@ -1164,7 +1165,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 
     if os.path.exists("unicycler.log"):
         unicyclerLogFile = prefix+"unicycler.log"
-        shutil.move("unicycler.log", os.path.join(SAVE_DIR, unicyclerLogFile))
+        shutil.move("unicycler.log", os.path.join(DETAILS_DIR, unicyclerLogFile))
 
     if not os.path.exists("assembly.fasta"):
         comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
@@ -1182,7 +1183,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
                 contigIndex += 1
 
     assemblyGraphFile = prefix+"assembly_graph.gfa"
-    shutil.move("assembly.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
+    shutil.move("assembly.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
 
     contigsFile = "contigs.fasta"
     shutil.move("assembly.fasta", contigsFile) #rename to canonical name
@@ -1274,9 +1275,9 @@ def runSpades(details, args):
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
     spadesLogFile = args.prefix+"spades.log"
     try:
-        shutil.move("spades.log", os.path.join(SAVE_DIR, spadesLogFile))
+        shutil.move("spades.log", os.path.join(DETAILS_DIR, spadesLogFile))
         assemblyGraphFile = args.prefix+"assembly_graph.gfa"
-        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(SAVE_DIR, assemblyGraphFile))
+        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
     except Exception as e:
         LOG.write(str(e))
     if not os.path.exists(contigsFile):
@@ -1608,7 +1609,11 @@ usage: canu [-version] [-citation] \
 
     LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
     if os.path.exists("canu.report"):
-        shutil.move("canu.report", os.path.join(SAVE_DIR, prefix+"canu_report.txt"))
+        LOG.write("details_dir = %s\n"%DETAILS_DIR)
+        LOG.write("canu_report file name = %s\n"%(prefix+"canu_report.txt"))
+        canuReportFile = os.path.join(DETAILS_DIR, (prefix+"canu_report.txt"))
+        LOG.write("moving canu.report to %s\n"%canuReportFile)
+        shutil.move("canu.report", canuReportFile)
     
     if not os.path.exists("canu.contigs.fasta"):
         comment = "Canu failed to generate contigs file. Check "+prefix+"canu_report.txt"
@@ -1619,7 +1624,7 @@ usage: canu [-version] [-citation] \
     # rename to canonical contigs.fasta
     contigsFile = "contigs.fasta"
     shutil.move("canu.contigs.fasta", contigsFile)
-    shutil.move("canu.contigs.gfa", os.path.join(SAVE_DIR, prefix+"assembly_graph.gfa"))
+    shutil.move("canu.contigs.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
@@ -1660,9 +1665,9 @@ def write_html_report(htmlFile, details):
         for reads in details["trim report"]:
             HTML.write("<b>"+reads+"</b><ul>")
             for report in details["trim report"][reads]:
-                if os.path.exists(os.path.join(SAVE_DIR, report)):
+                if os.path.exists(os.path.join(DETAILS_DIR, report)):
                     HTML.write("<pre>\n")
-                    HTML.write(open(os.path.join(SAVE_DIR, report)).read())
+                    HTML.write(open(os.path.join(DETAILS_DIR, report)).read())
                     HTML.write("\n</pre>\n")
         HTML.write("</div>\n")
 
@@ -1696,9 +1701,9 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
-        if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
+        if os.path.exists(os.path.join(DETAILS_DIR, details["quast_txt"])):
             HTML.write("<pre>\n")
-            HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
+            HTML.write(open(os.path.join(DETAILS_DIR, details["quast_txt"])).read())
             HTML.write("\n</pre>\n")
     
     if details["post-assembly transformation"]:
@@ -1801,8 +1806,11 @@ def main():
     if os.path.exists(SAVE_DIR):
         shutil.rmtree(SAVE_DIR)
     os.mkdir(SAVE_DIR)
-    logfileName = os.path.join(SAVE_DIR, args.prefix + "p3_assembly.log")
-
+    global DETAILS_DIR
+    DETAILS_DIR = os.path.abspath(os.path.join(SAVE_DIR, "details"))
+    os.mkdir(DETAILS_DIR)
+    logfileName = os.path.join(DETAILS_DIR, args.prefix + "p3_assembly.log")
+ 
     if args.path_prefix:
         os.environ["PATH"] = ":".join(args.path_prefix) + ":" + os.environ["PATH"]
 
@@ -1814,6 +1822,7 @@ def main():
     LOG.write("args= "+str(args)+"\n\n")
     LOG.write("Work directory is "+WORK_DIR+"\n\n")
     LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
+    LOG.write("Detailed output will be saved to "+DETAILS_DIR+"\n\n")
     details = { 'logfile' : logfileName }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
@@ -1858,7 +1867,7 @@ def main():
 
     if args.trim and details['platform']['illumina'] + details['platform']['iontorrent']:
         trimGalore(details, threads=args.threads)
-
+    LOG.write("details dir = "+DETAILS_DIR+"\n")
     if args.recipe == "auto":
         #now must decide which assembler to use
         if True:
@@ -1923,7 +1932,7 @@ def main():
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
-    with open(os.path.join(SAVE_DIR, args.prefix+"run_details.json"), "w") as fp:
+    with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         json.dump(details, fp, indent=2, sort_keys=True)
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
