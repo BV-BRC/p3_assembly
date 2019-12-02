@@ -1951,7 +1951,7 @@ def main():
         runQuast(contigs, args, details)
         shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
 
-    gfaFile = os.path.join(SAVE_DIR, args.prefix+"assembly_graph.gfa")
+    gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
