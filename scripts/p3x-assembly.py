@@ -3,6 +3,7 @@ import sys
 import subprocess
 import argparse
 import gzip
+import bz2
 import os
 import os.path
 import re
@@ -82,6 +83,24 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         if os.path.abspath(dir2) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WORK_DIR,file2)))
             os.symlink(os.path.abspath(read2), os.path.join(WORK_DIR,file2))
+        if file1.endswith(".bz2"):
+            uncompressed_file1 = file1[:-4]
+            with open(os.path.join(WORK_DIR, uncompressed_file1), 'w') as OUT:
+                with open(os.path.join(WORK_DIR, file1)) as IN:
+                    OUT.write(bz2.decompress(IN.read()))
+                    comment = "decompressing bz2 file %s to %s"%(file1, uncompressed_file1)
+                    LOG.write(comment+"\n")
+                    details["pre-assembly transformation"].append(comment)
+                    file1 = uncompressed_file1
+        if file2.endswith(".bz2"):
+            uncompressed_file2 = file2[:-4]
+            with open(os.path.join(WORK_DIR, uncompressed_file2), 'w') as OUT:
+                with open(os.path.join(WORK_DIR, file2)) as IN:
+                    OUT.write(bz2.decompress(IN.read()))
+                    comment = "decompressing bz2 file %s to %s"%(file2, uncompressed_file2)
+                    LOG.write(comment+"\n")
+                    details["pre-assembly transformation"].append(comment)
+                    file2 = uncompressed_file2
         readStruct["file"].append(file1)
         readStruct["file"].append(file2)
         #readStruct["path"].append(read1)
@@ -167,6 +186,9 @@ def studyPairedReads(item, details):
     if file1.endswith("gz"):
         F1 = gzip.open(os.path.join(WORK_DIR, file1))
         F2 = gzip.open(os.path.join(WORK_DIR, file2))
+    elif file1.endswith("bz2"):
+        F1 = bz2.BZ2File(os.path.join(WORK_DIR, file1))
+        F2 = bz2.BZ2File(os.path.join(WORK_DIR, file2))
     else:
         F1 = open(os.path.join(WORK_DIR, file1))
         F2 = open(os.path.join(WORK_DIR, file2))
@@ -479,6 +501,8 @@ def sampleReads(filename, details=None):
 
     if filename.endswith("gz"):
         F = gzip.open(filename)
+    elif filename.endswith("bz2"):
+        F = bz2.BZ2File(filename)
     else:
         F = open(filename)
     text = F.read(Default_bytes_to_sample) #read X number of bytes for text sample
@@ -1701,9 +1725,9 @@ def write_html_report(htmlFile, details):
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
         HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
-        if os.path.exists(os.path.join(DETAILS_DIR, details["quast_txt"])):
+        if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
             HTML.write("<pre>\n")
-            HTML.write(open(os.path.join(DETAILS_DIR, details["quast_txt"])).read())
+            HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
             HTML.write("\n</pre>\n")
     
     if details["post-assembly transformation"]:
