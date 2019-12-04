@@ -995,8 +995,14 @@ def runQuast(contigsFile, args, details):
     LOG.write("return code = %d\n"%return_code)
     if return_code == 0:
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.html"))
+        shutil.move(os.path.join(quastDir, "report.tsv"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.tsv"))
         shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.txt"))
+        shutil.move(os.path.join(quastDir, "transposed_report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.txt"))
+        shutil.move(os.path.join(quastDir, "transposed_report.tsv"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.tsv"))
+        details["quast_transposed_txt"] = "details/"+args.prefix+"quast_transposed_report.txt"
+        details["quast_transposed_tsv"] = "details/"+args.prefix+"quast_transposed_report.tsv"
         details["quast_txt"] = "details/"+args.prefix+"quast_report.txt"
+        details["quast_tsv"] = "details/"+args.prefix+"quast_report.tsv"
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
