@@ -414,15 +414,19 @@ def inferPlatform(read_id, maxReadLength):
             return "iontorrent" # 
         if re.match(r"@[SED]RR\d+\.\d+", read_id):
             return "illumina" # default short fastq type 
-# NOTE: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
-    if re.match(r"@\S+/\S+/\S+_\S+$", read_id): #@<MovieName> /<ZMW_number>/<subread-start>_<subread-end> :this is CCS Subread
-        return "pacbio" # 
-    if re.match(r"@\S+/\S+$", read_id): #@<MovieName>/<ZMW_number> 
-        return "pacbio" # 
-#@d5edc711-3388-4510-ace0-5d39d0d70e19 runid=999acb6b58d1c399244c42f88902c6e5eeb3cacf read=10 ch=446 start_time=2017-10-24T17:33:18Z
-    if re.match(r"@[a-z0-9-]+\s+runid=\S+\s+read=\d+\s+ch=", read_id): #based on one example, need to test more 
-        return "nanopore" # 
-    return "pacbio" # default long fastq type
+    else: # one of the long read types (pacbio or nanopore)
+    # todo: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
+        if re.match(r"@\S+/\S+/\S+_\S+$", read_id): #@<MovieName> /<ZMW_number>/<subread-start>_<subread-end> :this is CCS Subread
+            return "pacbio" # 
+        if re.match(r"@\S+/\S+$", read_id): #@<MovieName>/<ZMW_number> 
+            return "pacbio" # 
+    #@d5edc711-3388-4510-ace0-5d39d0d70e19 runid=999acb6b58d1c399244c42f88902c6e5eeb3cacf read=10 ch=446 start_time=2017-10-24T17:33:18Z
+        if re.match(r"@[a-z0-9-]+\s+runid=\S+\s+read=\d+\s+ch=", read_id): #based on one example, need to test more 
+            return "nanopore" # 
+        return "pacbio" # default long fastq type
+    # if we get here, we failed to recognize what read type it is, default to illumina
+    LOG.write("inferPlatform defaulting to 'illumina'\n")
+    return "illumina"
 
 def trimGalore(details, threads=1):
     startTrimTime = time()
@@ -532,11 +536,9 @@ def sampleReads(filename, details=None):
                 seq = ""
             else:
                 seq += line.rstrip()
-    avg_read_length = 0
-    if readLengths:
-        avg_read_length = sum(readLengths)/float(len(readLengths))
-    LOG.write("read type %s, average read length %.1f\n"%(read_format, avg_read_length))
-    return read_id_sample, avg_read_length
+    max_read_length = max(readLengths)
+    LOG.write("read type %s, maximum read length %.1f\n"%(read_format, max_read_length))
+    return read_id_sample, max_read_length
 
 def findSingleDifference(s1, s2):
 # if two strings differ in only a single contiguous region, return the start and end of region, else return None
@@ -584,8 +586,8 @@ def categorize_anonymous_read_files(args, details):
         if ":" in item or "%" in item:
             pairedFiles.append(item)
         else:
-            read_id_sample[item], avg_read_length = sampleReads(item, details)
-            read_file_type[item] = inferPlatform(read_id_sample[item][0], avg_read_length)
+            read_id_sample[item], max_read_length = sampleReads(item, details)
+            read_file_type[item] = inferPlatform(read_id_sample[item][0], max_read_length)
             comment = "interpreting %s type as %s"%(item, read_file_type[item])
             LOG.write(comment+"\n")
             details["pre-assembly transformation"].append(comment)
@@ -633,14 +635,14 @@ def categorize_anonymous_read_files(args, details):
             details["problem"].append(comment)
             continue
         if filename1 not in read_file_type:
-            read_id_sample[filename1], avg_read_length = sampleReads(filename1, details)
-            read_file_type[filename1] = inferPlatform(read_id_sample[filename1][0], avg_read_length)
+            read_id_sample[filename1], max_read_length = sampleReads(filename1, details)
+            read_file_type[filename1] = inferPlatform(read_id_sample[filename1][0], max_read_length)
             comment = "interpreting %s type as %s"%(filename1, read_file_type[filename1])
             LOG.write(comment+"\n")
             details["pre-assembly transformation"].append(comment)
         if filename2 not in read_file_type:
-            read_id_sample[filename2], avg_read_length = sampleReads(filename2, details)
-            read_file_type[filename2] = inferPlatform(read_id_sample[filename2][0], avg_read_length)
+            read_id_sample[filename2], max_read_length = sampleReads(filename2, details)
+            read_file_type[filename2] = inferPlatform(read_id_sample[filename2][0], max_read_length)
             comment = "interpreting %s type as %s"%(filename2, read_file_type[filename2])
             LOG.write(comment+"\n")
             details["pre-assembly transformation"].append(comment)
