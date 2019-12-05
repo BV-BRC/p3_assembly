@@ -273,9 +273,12 @@ def studySingleReads(item, details):
     details['reads'][item]['layout'] = 'single-end'
     details['reads'][item]['num_reads'] = 0
     if item.endswith("gz"):
-        F = gzip.open(item)
+        F = gzip.open(os.path.join(WORK_DIR, item))
+    elif item.endswith("bz2"):
+        F = bz2.BZ2File(os.path.join(WORK_DIR, item))
+        F = bz2.BZ2File(item)
     else:
-        F = open(item)
+        F = open(os.path.join(WORK_DIR, item))
 
     line = F.readline()
     sample_read_id = line.split(' ')[0] # get part up to first space, if any 
