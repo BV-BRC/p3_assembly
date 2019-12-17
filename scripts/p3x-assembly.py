@@ -276,7 +276,6 @@ def studySingleReads(item, details):
         F = gzip.open(os.path.join(WORK_DIR, item))
     elif item.endswith("bz2"):
         F = bz2.BZ2File(os.path.join(WORK_DIR, item))
-        F = bz2.BZ2File(item)
     else:
         F = open(os.path.join(WORK_DIR, item))
 
