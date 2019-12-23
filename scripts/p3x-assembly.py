@@ -1622,8 +1622,9 @@ usage: canu [-version] [-citation] \
     LOG.write("canu command =\n"+" ".join(command)+"\n")
 
     canuStartTime = time()
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+    #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+    with open(os.path.join(DETAILS_DIR, "canu_stdout.txt"), 'w') as CANU_STDOUT: 
+        return_code = subprocess.call(command, shell=False, stdout=CANU_STDOUT, stderr=CANU_STDOUT)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
