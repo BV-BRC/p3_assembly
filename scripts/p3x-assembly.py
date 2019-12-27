@@ -1828,8 +1828,10 @@ def main():
     if args.params_json:
         parseJsonParameters(args)
     baseName = args.outputDirectory #"p3_assembly" 
-    if args.prefix and not args.prefix.endswith("_"):
-        args.prefix += "_"
+    if args.prefix:
+        args.prefix = args.prefix.replace(" ", "_")
+        if not args.prefix.endswith("_"):
+            args.prefix += "_"
     global WORK_DIR
     WORK_DIR = baseName+"_work"
     if os.path.exists(WORK_DIR):
