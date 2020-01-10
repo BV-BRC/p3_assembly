@@ -1468,9 +1468,9 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     polish contigs with short reads (illumina or iontorrent)
     first map reads to contigs with bowtie
     """
-    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    if not os.path.exists(pilon_jar):
-        comment = "jarfile %s not found when processing %s, giving up"%(pilon_jar, shortReadFastq)
+    LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
+    if not (pilon_jar and os.path.exists(pilon_jar)):
+        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar, shortReadFastq)
         details['problem'].append(comment)
         LOG.write(comment+"\n")
         return
@@ -1928,7 +1928,7 @@ def main():
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
-    if contigs and os.path.getsize(contigs):
+    if contigs and os.path.getsize(contigs) and args.racon_iterations:
         # now run racon with each long-read file
         for longReadFile in details['reads']:
             if details['reads'][longReadFile]['length_class'] == 'long':
@@ -1940,15 +1940,15 @@ def main():
                     else:
                         break # break out of iterating racon_iterations, go to next long-read file if any
         
-    if contigs and os.path.getsize(contigs):
+    if contigs and os.path.getsize(contigs) and args.pilon_iterations and args.pilon_jar:
         # now run pilon with each short-read file
-        for shortReadFastq in details['reads']:
-            if 'superceded_by' in details['reads'][shortReadFastq]:
+        for readFastq in details['reads']:
+            if 'superceded_by' in details['reads'][readFastq]:
                 continue # may have been superceded by trimmed version of those reads
-            if details['reads'][shortReadFastq]['length_class'] == 'short':
+            if details['reads'][readFastq]['length_class'] == 'short':
                 for iteration in range(0, args.pilon_iterations):
-                    LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, shortReadFastq, args.pilon_jar, args.threads, iteration))
-                    pilonContigFile = runPilon(contigs, shortReadFastq, details, args.pilon_jar, threads=args.threads)
+                    LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, readFastq, args.pilon_jar, args.threads, iteration))
+                    pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, threads=args.threads)
                     if pilonContigFile is not None:
                         contigs = pilonContigFile
                     else:
