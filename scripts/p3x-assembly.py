@@ -1279,11 +1279,15 @@ def runSpades(details, args):
                     k = int(m.group(1))
                     knums.append(k)
             knums = sorted(knums) 
-            next_to_last_k = knums[-1]
             kstr = str(knums[0])
             for k in knums[1:-1]:
                 kstr += ","+str(k)
-            command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
+                next_to_last_k = k
+
+            command = ["spades.py", "--threads", str(args.threads), "-o", "."]
+            if args.memory:
+                command.extend(["-m", str(args.memory)])
+            command.extend(("--restart-from", "k%d"%next_to_last_k, "-k", kstr)) 
             LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
 
             with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
@@ -1470,7 +1474,7 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     """
     LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     if not (pilon_jar and os.path.exists(pilon_jar)):
-        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar, shortReadFastq)
+        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
         details['problem'].append(comment)
         LOG.write(comment+"\n")
         return
@@ -1919,6 +1923,8 @@ def main():
                 args.recipe = "canu"
             else:
                 args.recipe = "unicycler"
+
+    contigs = ""
     if "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
@@ -1929,33 +1935,35 @@ def main():
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
     if contigs and os.path.getsize(contigs) and args.racon_iterations:
-        # now run racon with each long-read file
-        for longReadFile in details['reads']:
-            if details['reads'][longReadFile]['length_class'] == 'long':
-                for i in range(0, args.racon_iterations):
-                    LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
-                    raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
-                    if raconContigFile is not None:
-                        contigs = raconContigFile
-                    else:
-                        break # break out of iterating racon_iterations, go to next long-read file if any
-        
-    if contigs and os.path.getsize(contigs) and args.pilon_iterations and args.pilon_jar:
-        # now run pilon with each short-read file
-        for readFastq in details['reads']:
-            if 'superceded_by' in details['reads'][readFastq]:
-                continue # may have been superceded by trimmed version of those reads
-            if details['reads'][readFastq]['length_class'] == 'short':
-                for iteration in range(0, args.pilon_iterations):
-                    LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, readFastq, args.pilon_jar, args.threads, iteration))
-                    pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, threads=args.threads)
-                    if pilonContigFile is not None:
-                        contigs = pilonContigFile
-                    else:
-                        break
-                    if details['pilon_changes'] == 0:
-                        break
-        
+        LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+        if args.racon_iterations:
+            # now run racon with each long-read file
+            for longReadFile in details['reads']:
+                if details['reads'][longReadFile]['length_class'] == 'long':
+                    for i in range(0, args.racon_iterations):
+                        LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
+                        raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
+                        if raconContigFile is not None:
+                            contigs = raconContigFile
+                        else:
+                            break # break out of iterating racon_iterations, go to next long-read file if any
+            
+        if args.pilon_iterations and args.pilon_jar:
+            # now run pilon with each short-read file
+            for readFastq in details['reads']:
+                if 'superceded_by' in details['reads'][readFastq]:
+                    continue # may have been superceded by trimmed version of those reads
+                if details['reads'][readFastq]['length_class'] == 'short':
+                    for iteration in range(0, args.pilon_iterations):
+                        LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, readFastq, args.pilon_jar, args.threads, iteration))
+                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, threads=args.threads)
+                        if pilonContigFile is not None:
+                            contigs = pilonContigFile
+                        else:
+                            break
+                        if details['pilon_changes'] == 0:
+                            break
+            
     if contigs and os.path.getsize(contigs):
         filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
         if filteredContigs:
@@ -1965,12 +1973,13 @@ def main():
         shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
 
     gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
-    if os.path.exists(gfaFile):
+    if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         json.dump(details, fp, indent=2, sort_keys=True)
+
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
