@@ -1142,8 +1142,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
-    command.extend(("--keep", "0")) # keep only assembly.gfa, assembly.fasta and unicycler.log
-    command.append("--no_pilon")
+    command.extend(("--keep", "2")) # keep files needed for re-run if necessary
+    command.append("--no_pilon")  # we will run our own, if requested
 
     # put all read files on command line, let Unicycler figure out which type each is
     # apparently unicycler can only accept one read set in each class (I tried multiple ways to submit 2 paired-end sets, failed)
@@ -1178,6 +1178,16 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
         return_code = subprocess.call(command, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
+
+    if not (os.path.exists("assembly.fasta") and os.path.getsize("assembly.fasta")):
+        comment = "First run of Unicycler resulted in no assembly, try again with more lenient parameters."
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        command.extend(("--mode", "bold", "--min_component_size", "300", "--min_dead_end_size", "300", "--depth_filter", "0.1"))
+        LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
+        with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
+            return_code = subprocess.call(command, shell=False, stdout=FNULL)
+        LOG.write("return code = %d\n"%return_code)
 
     unicyclerEndTime = time()
     elapsedTime = unicyclerEndTime - unicyclerStartTime
