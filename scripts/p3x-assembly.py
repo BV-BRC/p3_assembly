@@ -1691,10 +1691,9 @@ def write_html_report(htmlFile, details):
         if 'supercedes' in details['reads'][item]:
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
-        for key in sorted(details['reads'][item]):
-            if key == 'problem':
-                continue
-            HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
+        for key in ('platform', 'layout', 'avg_len', 'max_read_len', 'min_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
+            if key in details['reads'][item]:
+                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
         if "problem" in details['reads'][item] and details['reads'][item]['problem']:
             HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
