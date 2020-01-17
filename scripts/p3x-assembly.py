@@ -1138,7 +1138,11 @@ def runBandage(gfaFile, details):
 
 def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    LOG.write("runUnicycler: elapsed seconds = %f\n"%(time()-START_TIME))
+    LOG.write("runUnicycler\n")
+    details["assembly"] = { 
+                'assembler': 'unicycler',
+                'problem' : []
+                }
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
@@ -1175,6 +1179,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     unicyclerStartTime = time()
+    details["assembly"]['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
         return_code = subprocess.call(command, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
@@ -1182,9 +1187,11 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     if not (os.path.exists("assembly.fasta") and os.path.getsize("assembly.fasta")):
         comment = "First run of Unicycler resulted in no assembly, try again with more lenient parameters."
         LOG.write(comment+"\n")
-        details["problem"].append(comment)
+        details["assembly"]["problem"].append(comment)
         command.extend(("--mode", "bold", "--min_component_size", "300", "--min_dead_end_size", "300", "--depth_filter", "0.1"))
-        LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
+        comment = "re-run unicycler with command = "+" ".join(command)
+        LOG.write(comment+"\n")
+        details["assembly"]["problem"].append(comment)
         with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
             return_code = subprocess.call(command, shell=False, stdout=FNULL)
         LOG.write("return code = %d\n"%return_code)
@@ -1199,11 +1206,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
-    details["assembly"] = { 
-                'assembly_elapsed_time' : elapsedHumanReadable,
-                'assembler': 'unicycler',
-                'command_line': " ".join(command)
-                }
+    details["assembly"]['assembly_time'] = elapsedHumanReadable
 
     LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
 
@@ -1237,10 +1240,14 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
+    details["assembly"] = { 
+        'assembler': 'spades',
+        'problem' : []
+        }
 
     if args.illumina and args.iontorrent:
         comment = "SPAdes is not meant to process both Illumina and IonTorrent reads in the same run"
-        details["problem"].append(comment)
+        details["assembly"]["problem"].append(comment)
         LOG.write(comment+"\n")
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
     if args.recipe == 'single-cell':
@@ -1270,15 +1277,16 @@ def runSpades(details, args):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
 
+    details['assembly']['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
 
     contigsFile = "contigs.fasta"
     if return_code and not os.path.exists(contigsFile):
-        comment = "spades return code = %d, see if we can restart"%return_code
+        comment = "spades return code = %d, attempt re-running with controlled k-mer"%return_code
         LOG.write(comment+"\n")
-        details['problem'].append(comment)
+        details['assembly']['problem'].append(comment)
         #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
         kdirs = glob.glob("K*")
         if len(kdirs) > 1:
@@ -1298,7 +1306,9 @@ def runSpades(details, args):
             if args.memory:
                 command.extend(["-m", str(args.memory)])
             command.extend(("--restart-from", "k%d"%next_to_last_k, "-k", kstr)) 
-            LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
+            comment = "restart: SPAdes command = "+" ".join(command)+"\n"
+            LOG.write(comment+"\n")
+            details['assembly']['problem'].append(comment)
 
             with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
                 return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
@@ -1314,11 +1324,7 @@ def runSpades(details, args):
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
-    details["assembly"] = { 
-        'assembly_elapsed_time' : elapsedHumanReadable,
-        'assembler': 'spades',
-        'command_line': " ".join(command)
-        }
+    details["assembly"]['assembly_time'] = elapsedHumanReadable
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
     spadesLogFile = args.prefix+"spades.log"
@@ -1742,6 +1748,11 @@ def write_html_report(htmlFile, details):
         HTML.write("</table>\n")
     else:
         HTML.write("<p>None</p>\n")
+    if "problem" in details['assembly'] and details['assembly']['problem']:
+        HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
+        for prob in details['assembly']['problem']:
+            HTML.write("<li>"+prob+"\n")
+        HTML.write("</ul></div>\n")
 
     if "quast_txt" in details:
         HTML.write("<h3>Quast Report</h3>\n")
