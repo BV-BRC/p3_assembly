@@ -1138,12 +1138,16 @@ def runBandage(gfaFile, details):
 
 def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    LOG.write("runUnicycler: elapsed seconds = %f\n"%(time()-START_TIME))
+    LOG.write("runUnicycler\n")
+    details["assembly"] = { 
+                'assembler': 'unicycler',
+                'problem' : []
+                }
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
-    command.extend(("--keep", "0")) # keep only assembly.gfa, assembly.fasta and unicycler.log
-    command.append("--no_pilon")
+    command.extend(("--keep", "2")) # keep files needed for re-run if necessary
+    command.append("--no_pilon")  # we will run our own, if requested
 
     # put all read files on command line, let Unicycler figure out which type each is
     # apparently unicycler can only accept one read set in each class (I tried multiple ways to submit 2 paired-end sets, failed)
@@ -1175,9 +1179,22 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     unicyclerStartTime = time()
+    details["assembly"]['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
         return_code = subprocess.call(command, shell=False, stdout=FNULL)
     LOG.write("return code = %d\n"%return_code)
+
+    if not (os.path.exists("assembly.fasta") and os.path.getsize("assembly.fasta")):
+        comment = "First run of Unicycler resulted in no assembly, try again with more lenient parameters."
+        LOG.write(comment+"\n")
+        details["assembly"]["problem"].append(comment)
+        command.extend(("--mode", "bold", "--min_component_size", "300", "--min_dead_end_size", "300", "--depth_filter", "0.1"))
+        comment = "re-run unicycler with command = "+" ".join(command)
+        LOG.write(comment+"\n")
+        details["assembly"]["problem"].append(comment)
+        with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
+            return_code = subprocess.call(command, shell=False, stdout=FNULL)
+        LOG.write("return code = %d\n"%return_code)
 
     unicyclerEndTime = time()
     elapsedTime = unicyclerEndTime - unicyclerStartTime
@@ -1189,11 +1206,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
-    details["assembly"] = { 
-                'assembly_elapsed_time' : elapsedHumanReadable,
-                'assembler': 'unicycler',
-                'command_line': " ".join(command)
-                }
+    details["assembly"]['assembly_time'] = elapsedHumanReadable
 
     LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
 
@@ -1227,10 +1240,14 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
+    details["assembly"] = { 
+        'assembler': 'spades',
+        'problem' : []
+        }
 
     if args.illumina and args.iontorrent:
         comment = "SPAdes is not meant to process both Illumina and IonTorrent reads in the same run"
-        details["problem"].append(comment)
+        details["assembly"]["problem"].append(comment)
         LOG.write(comment+"\n")
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
     if args.recipe == 'single-cell':
@@ -1260,15 +1277,16 @@ def runSpades(details, args):
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     spadesStartTime = time()
 
+    details['assembly']['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
 
     contigsFile = "contigs.fasta"
     if return_code and not os.path.exists(contigsFile):
-        comment = "spades return code = %d, see if we can restart"%return_code
+        comment = "spades return code = %d, attempt re-running with controlled k-mer"%return_code
         LOG.write(comment+"\n")
-        details['problem'].append(comment)
+        details['assembly']['problem'].append(comment)
         #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
         kdirs = glob.glob("K*")
         if len(kdirs) > 1:
@@ -1279,12 +1297,18 @@ def runSpades(details, args):
                     k = int(m.group(1))
                     knums.append(k)
             knums = sorted(knums) 
-            next_to_last_k = knums[-1]
             kstr = str(knums[0])
             for k in knums[1:-1]:
                 kstr += ","+str(k)
-            command.extend("--restart-from", "k%d"%next_to_last_k, "-k", kstr) 
-            LOG.write("restart: SPAdes command =\n"+" ".join(command)+"\n")
+                next_to_last_k = k
+
+            command = ["spades.py", "--threads", str(args.threads), "-o", "."]
+            if args.memory:
+                command.extend(["-m", str(args.memory)])
+            command.extend(("--restart-from", "k%d"%next_to_last_k, "-k", kstr)) 
+            comment = "restart: SPAdes command = "+" ".join(command)+"\n"
+            LOG.write(comment+"\n")
+            details['assembly']['problem'].append(comment)
 
             with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
                 return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
@@ -1300,11 +1324,7 @@ def runSpades(details, args):
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
-    details["assembly"] = { 
-        'assembly_elapsed_time' : elapsedHumanReadable,
-        'assembler': 'spades',
-        'command_line': " ".join(command)
-        }
+    details["assembly"]['assembly_time'] = elapsedHumanReadable
 
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
     spadesLogFile = args.prefix+"spades.log"
@@ -1468,9 +1488,9 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     polish contigs with short reads (illumina or iontorrent)
     first map reads to contigs with bowtie
     """
-    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
-    if not os.path.exists(pilon_jar):
-        comment = "jarfile %s not found when processing %s, giving up"%(pilon_jar, shortReadFastq)
+    LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
+    if not (pilon_jar and os.path.exists(pilon_jar)):
+        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
         details['problem'].append(comment)
         LOG.write(comment+"\n")
         return
@@ -1677,10 +1697,9 @@ def write_html_report(htmlFile, details):
         if 'supercedes' in details['reads'][item]:
             continue # this is a derived item, not original input
         HTML.write(item+"<table class='a'>")
-        for key in sorted(details['reads'][item]):
-            if key == 'problem':
-                continue
-            HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
+        for key in ('platform', 'layout', 'avg_len', 'max_read_len', 'min_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
+            if key in details['reads'][item]:
+                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
         HTML.write("</table>\n")
         if "problem" in details['reads'][item] and details['reads'][item]['problem']:
             HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
@@ -1729,6 +1748,11 @@ def write_html_report(htmlFile, details):
         HTML.write("</table>\n")
     else:
         HTML.write("<p>None</p>\n")
+    if "problem" in details['assembly'] and details['assembly']['problem']:
+        HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
+        for prob in details['assembly']['problem']:
+            HTML.write("<li>"+prob+"\n")
+        HTML.write("</ul></div>\n")
 
     if "quast_txt" in details:
         HTML.write("<h3>Quast Report</h3>\n")
@@ -1919,6 +1943,8 @@ def main():
                 args.recipe = "canu"
             else:
                 args.recipe = "unicycler"
+
+    contigs = ""
     if "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
@@ -1928,34 +1954,36 @@ def main():
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
-    if contigs and os.path.getsize(contigs):
-        # now run racon with each long-read file
-        for longReadFile in details['reads']:
-            if details['reads'][longReadFile]['length_class'] == 'long':
-                for i in range(0, args.racon_iterations):
-                    LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
-                    raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
-                    if raconContigFile is not None:
-                        contigs = raconContigFile
-                    else:
-                        break # break out of iterating racon_iterations, go to next long-read file if any
-        
-    if contigs and os.path.getsize(contigs):
-        # now run pilon with each short-read file
-        for shortReadFastq in details['reads']:
-            if 'superceded_by' in details['reads'][shortReadFastq]:
-                continue # may have been superceded by trimmed version of those reads
-            if details['reads'][shortReadFastq]['length_class'] == 'short':
-                for iteration in range(0, args.pilon_iterations):
-                    LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, shortReadFastq, args.pilon_jar, args.threads, iteration))
-                    pilonContigFile = runPilon(contigs, shortReadFastq, details, args.pilon_jar, threads=args.threads)
-                    if pilonContigFile is not None:
-                        contigs = pilonContigFile
-                    else:
-                        break
-                    if details['pilon_changes'] == 0:
-                        break
-        
+    if contigs and os.path.getsize(contigs) and args.racon_iterations:
+        LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+        if args.racon_iterations:
+            # now run racon with each long-read file
+            for longReadFile in details['reads']:
+                if details['reads'][longReadFile]['length_class'] == 'long':
+                    for i in range(0, args.racon_iterations):
+                        LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
+                        raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
+                        if raconContigFile is not None:
+                            contigs = raconContigFile
+                        else:
+                            break # break out of iterating racon_iterations, go to next long-read file if any
+            
+        if args.pilon_iterations and args.pilon_jar:
+            # now run pilon with each short-read file
+            for readFastq in details['reads']:
+                if 'superceded_by' in details['reads'][readFastq]:
+                    continue # may have been superceded by trimmed version of those reads
+                if details['reads'][readFastq]['length_class'] == 'short':
+                    for iteration in range(0, args.pilon_iterations):
+                        LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, readFastq, args.pilon_jar, args.threads, iteration))
+                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, threads=args.threads)
+                        if pilonContigFile is not None:
+                            contigs = pilonContigFile
+                        else:
+                            break
+                        if details['pilon_changes'] == 0:
+                            break
+            
     if contigs and os.path.getsize(contigs):
         filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
         if filteredContigs:
@@ -1965,12 +1993,13 @@ def main():
         shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
 
     gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
-    if os.path.exists(gfaFile):
+    if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
         details["Bandage plot"] = bandagePlot
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         json.dump(details, fp, indent=2, sort_keys=True)
+
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
     LOG.write("done with %s\n"%sys.argv[0])
