@@ -539,6 +539,8 @@ def sampleReads(filename, details=None):
             else:
                 seq += line.rstrip()
     max_read_length = max(readLengths)
+    if len(read_id_sample) > 1:
+        read_id_sample = read_id_sample[:-1] # last entry might be truncated, avoid it
     LOG.write("read type %s, maximum read length %.1f\n"%(read_format, max_read_length))
     return read_id_sample, max_read_length
 
@@ -921,6 +923,8 @@ def writeSpadesYamlFile(details):
         OUT.write("\"\n    ]\n  }\n")
         precedingElement = True
     if interleaved_reads:
+        if precedingElement:
+            OUT.write(",\n")
         OUT.write("  {\n    type: \"paired-end\",\n    interlaced reads: [\n        \"")
         OUT.write("\",\n        \"".join(interleaved_reads))
         OUT.write("\"\n    ]\n  }\n")
