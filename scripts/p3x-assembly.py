@@ -1600,7 +1600,7 @@ def calcReadDepth(bamfiles):
         readDepth[c][1] = normalizedDepth
     return readDepth
 
-def runCanu(details, threads=1, genome_size="5m", memory=250, prefix=""):
+def runCanu(details, canu_exec="canu", threads=1, genome_size="5m", memory=250, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     canuStartTime = time()
     LOG.write("runCanu: elapsed seconds = %d\n"%(canuStartTime-START_TIME))
@@ -1615,9 +1615,16 @@ usage: canu [-version] [-citation] \
             [-pacbio-raw | -pacbio-corrected | -nanopore-raw | -nanopore-corrected] file1 file2 ...
     """
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
-    command = ["canu", "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
+    # first get canu version
+    p = subprocess.Popen([canu_exec, "--version"], stdout=subprocess.PIPE)
+    x = p.stdout.readline().rstrip()
+    canu_version = re.sub(r".* (\d\.\d).*", r"\1", x)
+
+
+    command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
-    command.append("gnuplotTested=true")
+    if canu_version == "1.7":
+        command.append("gnuplotTested=true")
     command.append("stopOnReadQuality=false")
     """
     https://canu.readthedocs.io/en/latest/parameter-reference.html
@@ -1648,7 +1655,7 @@ usage: canu [-version] [-citation] \
 
     canuStartTime = time()
     #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-    with open(os.path.join(DETAILS_DIR, "canu_stdout.txt"), 'w') as CANU_STDOUT: 
+    with open(os.path.join(DETAILS_DIR, prefix+"canu_stdout.txt"), 'w') as CANU_STDOUT: 
         return_code = subprocess.call(command, shell=False, stdout=CANU_STDOUT, stderr=CANU_STDOUT)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
@@ -1684,7 +1691,10 @@ usage: canu [-version] [-citation] \
     # rename to canonical contigs.fasta
     contigsFile = "contigs.fasta"
     shutil.move("canu.contigs.fasta", contigsFile)
-    shutil.move("canu.contigs.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
+    if os.path.exists("canu.contigs.gfa"):
+        shutil.move("canu.contigs.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
+    elif os.path.exists("canu.unitigs.gfa"):
+        shutil.move("canu.unitigs.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
@@ -1846,6 +1856,7 @@ def main():
     parser.add_argument('-m', '--memory', metavar='GB', type=int, default=250, help='RAM limit in Gb')
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
+    parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help='JSON file with additional information.')
     parser.add_argument('--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
@@ -1955,7 +1966,7 @@ def main():
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
     elif args.recipe == "canu":
-        contigs = runCanu(details, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
+        contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
