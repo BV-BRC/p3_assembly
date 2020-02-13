@@ -2011,7 +2011,8 @@ def main():
     gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
         bandagePlot = runBandage(gfaFile, details)
-        details["Bandage plot"] = bandagePlot
+        if bandagePlot:
+            details["Bandage plot"] = bandagePlot
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         json.dump(details, fp, indent=2, sort_keys=True)
