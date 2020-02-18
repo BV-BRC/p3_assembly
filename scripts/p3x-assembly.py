@@ -492,6 +492,13 @@ def trimGalore(details, threads=1):
                     trimReport = trimReport.group(1)
                     details["trim report"][reads]=trimReport
                     shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
+            command = ["trim_galore", "--version"]
+            proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+            version_text = proc.stdout.read().strip()
+            proc.wait()
+            m = re.search(r"(version\s+\S+)", version_text)
+            if m:
+                details["trim report"]['trim program'] = "trim_galore "+m.group(1)
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -1012,6 +1019,11 @@ def runQuast(contigsFile, args, details):
         details["quast_txt"] = "details/"+args.prefix+"quast_report.txt"
         details["quast_tsv"] = "details/"+args.prefix+"quast_report.tsv"
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
+        quastCommand = ["quast.py", "--version"]
+        proc = subprocess.Popen(quastCommand, shell=False, stdout=subprocess.PIPE)
+        version_text = proc.stdout.read()
+        proc.wait()
+        details["quast_version"] = version_text
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
@@ -1107,7 +1119,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
         details['bad_contigs'] = bad_contigs
         suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
         report.append("bad contigs written to "+suboptimalContigsFile)
-        details['suboptimal_contigs'] = suboptimalContigsFile
+        details['assembly']['suboptimal_contigs'] = suboptimalContigsFile
         suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
         with open(suboptimalContigsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalContigs)
@@ -1132,6 +1144,14 @@ def runBandage(gfaFile, details):
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
                 retval = plotFile
+                proc = subprocess.Popen(["Bandage", "--version"], shell=False, stdout=subprocess.PIPE)
+                version_text = proc.stdout.read().strip()
+                proc.wait()
+                details["Bandage"] = {
+                    "version" : "Bandage "+version_text,
+                    "plot" : plotFile,
+                    "command line": command
+                    }
             else:
                 LOG.write("Error creating Bandage plot\n")
         except OSError as ose:
@@ -1143,8 +1163,12 @@ def runBandage(gfaFile, details):
 def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
+    proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read()
+    version_text = version_text.split("\n")[1]
+    proc.wait()
     details["assembly"] = { 
-                'assembler': 'unicycler',
+                'assembler': version_text,
                 'problem' : []
                 }
     command = ["unicycler", "-t", str(threads), "-o", '.']
@@ -1222,16 +1246,18 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
-        details["problem"].append(comment)
+        details["assembly"]["problem"].append(comment)
         return None
-    details["contigCircular"] = []
+    contigCircular = []
     with open("assembly.fasta") as F:
         contigIndex = 1
         for line in F:
             if line.startswith(">"):
                 if "circular=true" in line:
-                    details["contigCircular"].append(contigIndex) 
+                    contigCircular.append(contigIndex) 
                 contigIndex += 1
+    if len(contigCircular):
+        details["contigCircular"] = contigCircular
 
     assemblyGraphFile = prefix+"assembly_graph.gfa"
     shutil.move("assembly.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
@@ -1244,15 +1270,21 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
-    details["assembly"] = { 
-        'assembler': 'spades',
-        'problem' : []
-        }
-
     if args.illumina and args.iontorrent:
         comment = "SPAdes is not meant to process both Illumina and IonTorrent reads in the same run"
         details["assembly"]["problem"].append(comment)
         LOG.write(comment+"\n")
+
+    command = ["spades.py", "--version"]
+    proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read().strip()
+    proc.wait()
+    details["assembly"] = { 
+        'assembler': version_text,
+        'problem' : []
+        }
+
+
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
     if args.recipe == 'single-cell':
         command.append("--sc")
@@ -1616,14 +1648,14 @@ usage: canu [-version] [-citation] \
     """
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     # first get canu version
-    p = subprocess.Popen([canu_exec, "--version"], stdout=subprocess.PIPE)
-    x = p.stdout.readline().rstrip()
-    canu_version = re.sub(r".* (\d\.\d).*", r"\1", x)
-
+    p = subprocess.Popen([canu_exec, "--version"], shell=False, stdout=subprocess.PIPE)
+    canu_version = p.stdout.readline().rstrip()
+    p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
-    if canu_version == "1.7":
+    if "1.7" in canu_version:
+        # special handling for this version
         command.append("gnuplotTested=true")
     command.append("stopOnReadQuality=false")
     """
@@ -1670,7 +1702,7 @@ usage: canu [-version] [-citation] \
 
     details["assembly"] = { 
                 'assembly_elapsed_time' : elapsedHumanReadable,
-                'assembler': 'canu',
+                'assembler': canu_version,
                 'command_line': " ".join(command)
                 }
 
@@ -1812,12 +1844,13 @@ def write_html_report(htmlFile, details):
             HTML.write("</ul>\n")
         HTML.write("</div>\n")
 
-    if "Bandage plot" in details:
-        #path, imageFile = os.path.split(details["Bandage plot"])
-        if os.path.exists(details["Bandage plot"]):
-            svg_text = open(details["Bandage plot"]).read()
+    if "Bandage" in details and "plot" in details["Bandage"]:
+        if os.path.exists(details["Bandage"]["plot"]):
+
+            svg_text = open(details["Bandage"]["plot"]).read()
             svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
             HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write(details["Bandage"]["version"]+"\n")
             HTML.write("<div class='a'>")
             HTML.write(svg_text+"\n\n")
             #HTML.write("<img src='%s'>\n"%imageFile)
@@ -2010,9 +2043,7 @@ def main():
 
     gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
-        bandagePlot = runBandage(gfaFile, details)
-        if bandagePlot:
-            details["Bandage plot"] = bandagePlot
+        runBandage(gfaFile, details)
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         json.dump(details, fp, indent=2, sort_keys=True)
