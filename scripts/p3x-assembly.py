@@ -580,13 +580,10 @@ def categorize_anonymous_read_files(args, details):
         m = re.match("([SED]RR\d+)", item)
         if m:
             sra = m.group(1)
-            if sra not in sraFiles:
-                sraFiles[sra] = [] 
-            sraFiles[sra].append(item)
+            if sra not in args.sra:
+                args.sra.append(sra)
         else:
             nonSraFiles.append(item)
-    for sra in sraFiles:
-        processSraFastqFiles(sorted(sraFiles[sra]), details)
 
     # now proceed with any non-sra files
     read_file_type = {}
@@ -695,7 +692,19 @@ def categorize_anonymous_read_files(args, details):
             valid_singles.add(item)
 
     for item in valid_pairs.union(valid_singles):
-        registerReads(item, details, platform=read_file_type[item], interleaved = args.interleaved and item in args.interleaved)
+        if read_file_type[item] == "illumina":
+            args.illumina.append(item)
+        elif read_file_type[item] == "iontorrent":
+            args.illumina.append(item)
+        elif read_file_type[item] == "pacbio":
+            args.illumina.append(item)
+        elif read_file_type[item] == "nanopore":
+            args.illumina.append(item)
+        else:
+            comment = "Cannot decide read type for item "+item
+            LOG.write(comment+"\n")
+            details['problems'].append(comment)
+        #registerReads(item, details, platform=read_file_type[item], interleaved = args.interleaved and item in args.interleaved)
 
     return
 
@@ -1793,12 +1802,12 @@ def write_html_report(htmlFile, details):
         for key in sorted(details['assembly']):
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
         HTML.write("</table>\n")
+        if "problem" in details['assembly'] and details['assembly']['problem']:
+            HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
+            for prob in details['assembly']['problem']:
+                HTML.write("<li>"+prob+"\n")
     else:
         HTML.write("<p>None</p>\n")
-    if "problem" in details['assembly'] and details['assembly']['problem']:
-        HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
-        for prob in details['assembly']['problem']:
-            HTML.write("<li>"+prob+"\n")
         HTML.write("</ul></div>\n")
 
     if "quast_txt" in details:
@@ -1873,7 +1882,8 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
-
+    parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
+    
     parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
     parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
@@ -1881,7 +1891,7 @@ def main():
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
     parser.add_argument('--min_contig_length', type=int, default=300, help='save contigs of this length or longer', required=False)
     parser.add_argument('--min_contig_coverage', type=float, default=5, help='save contigs of this coverage or deeper', required=False)
-    parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
+    #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
@@ -1942,6 +1952,12 @@ def main():
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
 
+    if args.anonymous_reads:
+        categorize_anonymous_read_files(args, details)
+
+    if args.sra:
+        fetch_sra_files(args.sra, details)
+
     if args.illumina:
         platform = 'illumina'
         for item in args.illumina:
@@ -1962,16 +1978,20 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore')
 
-    if args.fasta:
-        for item in args.fasta:
-            registerReads(item, details, platform = 'fasta')
-
-    if args.sra:
-        fetch_sra_files(args.sra, details)
-
-    if args.anonymous_reads:
-        categorize_anonymous_read_files(args, details)
-
+    contigs = ""
+    if args.contigs:
+        if not os.path.exists(args.contigs):
+            comment = "Specified contigs file not found: "+args.contigs
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+            sys.stderr.write(comment+"\n")
+            exit()
+        comment = "input contigs specified as "+args.contigs
+        LOG.write(comment+"\n")
+        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
+        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
+        contigs = "input_contigs.fasta"
+            
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
 
@@ -1993,8 +2013,12 @@ def main():
             else:
                 args.recipe = "unicycler"
 
-    contigs = ""
-    if "spades" in args.recipe or args.recipe == "single-cell":
+    if args.contigs:
+        LOG.write("analyzing pre-existing contigs.\n")
+        if not os.path.exists(contigs):
+            LOG.write("Problem: cannot find input contigs as "+contigs+"\n")
+            exit()
+    elif "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
