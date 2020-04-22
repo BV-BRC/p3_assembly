@@ -695,16 +695,16 @@ def categorize_anonymous_read_files(args, details):
         if read_file_type[item] == "illumina":
             args.illumina.append(item)
         elif read_file_type[item] == "iontorrent":
-            args.illumina.append(item)
+            args.iontorrent.append(item)
         elif read_file_type[item] == "pacbio":
-            args.illumina.append(item)
+            args.pacbio.append(item)
         elif read_file_type[item] == "nanopore":
-            args.illumina.append(item)
+            args.nanopore.append(item)
         else:
             comment = "Cannot decide read type for item "+item
             LOG.write(comment+"\n")
-            details['problems'].append(comment)
-        #registerReads(item, details, platform=read_file_type[item], interleaved = args.interleaved and item in args.interleaved)
+            details['problem'].append(comment)
+        registerReads(item, details, platform=read_file_type[item], interleaved = (args.interleaved and item in args.interleaved))
 
     return
 
