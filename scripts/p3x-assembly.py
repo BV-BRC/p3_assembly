@@ -2070,7 +2070,11 @@ def main():
         runBandage(gfaFile, details)
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
-        json.dump(details, fp, indent=2, sort_keys=True)
+        try:
+            json.dump(details, fp, indent=2, sort_keys=True)
+        except UnicodeDecodeError as ude:
+            LOG.write("Problem writing details to json: "+str(ude)+"\n")
+
 
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
