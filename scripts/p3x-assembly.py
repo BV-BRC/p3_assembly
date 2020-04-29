@@ -492,6 +492,13 @@ def trimGalore(details, threads=1):
                     trimReport = trimReport.group(1)
                     details["trim report"][reads]=trimReport
                     shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
+            command = ["trim_galore", "--version"]
+            proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+            version_text = proc.stdout.read().strip()
+            proc.wait()
+            m = re.search(r"(version\s+\S+)", version_text)
+            if m:
+                details["trim report"]['trim program'] = "trim_galore "+m.group(1)
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -573,13 +580,10 @@ def categorize_anonymous_read_files(args, details):
         m = re.match("([SED]RR\d+)", item)
         if m:
             sra = m.group(1)
-            if sra not in sraFiles:
-                sraFiles[sra] = [] 
-            sraFiles[sra].append(item)
+            if sra not in args.sra:
+                args.sra.append(sra)
         else:
             nonSraFiles.append(item)
-    for sra in sraFiles:
-        processSraFastqFiles(sorted(sraFiles[sra]), details)
 
     # now proceed with any non-sra files
     read_file_type = {}
@@ -688,7 +692,19 @@ def categorize_anonymous_read_files(args, details):
             valid_singles.add(item)
 
     for item in valid_pairs.union(valid_singles):
-        registerReads(item, details, platform=read_file_type[item], interleaved = args.interleaved and item in args.interleaved)
+        if read_file_type[item] == "illumina":
+            args.illumina.append(item)
+        elif read_file_type[item] == "iontorrent":
+            args.iontorrent.append(item)
+        elif read_file_type[item] == "pacbio":
+            args.pacbio.append(item)
+        elif read_file_type[item] == "nanopore":
+            args.nanopore.append(item)
+        else:
+            comment = "Cannot decide read type for item "+item
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+        registerReads(item, details, platform=read_file_type[item], interleaved = (args.interleaved and item in args.interleaved))
 
     return
 
@@ -1012,6 +1028,11 @@ def runQuast(contigsFile, args, details):
         details["quast_txt"] = "details/"+args.prefix+"quast_report.txt"
         details["quast_tsv"] = "details/"+args.prefix+"quast_report.tsv"
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
+        quastCommand = ["quast.py", "--version"]
+        proc = subprocess.Popen(quastCommand, shell=False, stdout=subprocess.PIPE)
+        version_text = proc.stdout.read()
+        proc.wait()
+        details["quast_version"] = version_text
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
@@ -1107,7 +1128,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
         details['bad_contigs'] = bad_contigs
         suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
         report.append("bad contigs written to "+suboptimalContigsFile)
-        details['suboptimal_contigs'] = suboptimalContigsFile
+        details['assembly']['suboptimal_contigs'] = suboptimalContigsFile
         suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
         with open(suboptimalContigsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalContigs)
@@ -1132,6 +1153,14 @@ def runBandage(gfaFile, details):
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
                 retval = plotFile
+                proc = subprocess.Popen(["Bandage", "--version"], shell=False, stdout=subprocess.PIPE)
+                version_text = proc.stdout.read().strip()
+                proc.wait()
+                details["Bandage"] = {
+                    "version" : "Bandage "+version_text,
+                    "plot" : plotFile,
+                    "command line": command
+                    }
             else:
                 LOG.write("Error creating Bandage plot\n")
         except OSError as ose:
@@ -1143,8 +1172,12 @@ def runBandage(gfaFile, details):
 def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
+    proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read()
+    version_text = version_text.split("\n")[1]
+    proc.wait()
     details["assembly"] = { 
-                'assembler': 'unicycler',
+                'assembler': version_text,
                 'problem' : []
                 }
     command = ["unicycler", "-t", str(threads), "-o", '.']
@@ -1222,16 +1255,18 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
-        details["problem"].append(comment)
+        details["assembly"]["problem"].append(comment)
         return None
-    details["contigCircular"] = []
+    contigCircular = []
     with open("assembly.fasta") as F:
         contigIndex = 1
         for line in F:
             if line.startswith(">"):
                 if "circular=true" in line:
-                    details["contigCircular"].append(contigIndex) 
+                    contigCircular.append(contigIndex) 
                 contigIndex += 1
+    if len(contigCircular):
+        details["contigCircular"] = contigCircular
 
     assemblyGraphFile = prefix+"assembly_graph.gfa"
     shutil.move("assembly.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
@@ -1244,15 +1279,21 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 def runSpades(details, args):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
-    details["assembly"] = { 
-        'assembler': 'spades',
-        'problem' : []
-        }
-
     if args.illumina and args.iontorrent:
         comment = "SPAdes is not meant to process both Illumina and IonTorrent reads in the same run"
         details["assembly"]["problem"].append(comment)
         LOG.write(comment+"\n")
+
+    command = ["spades.py", "--version"]
+    proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read().strip()
+    proc.wait()
+    details["assembly"] = { 
+        'assembler': version_text,
+        'problem' : []
+        }
+
+
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
     if args.recipe == 'single-cell':
         command.append("--sc")
@@ -1616,14 +1657,14 @@ usage: canu [-version] [-citation] \
     """
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     # first get canu version
-    p = subprocess.Popen([canu_exec, "--version"], stdout=subprocess.PIPE)
-    x = p.stdout.readline().rstrip()
-    canu_version = re.sub(r".* (\d\.\d).*", r"\1", x)
-
+    p = subprocess.Popen([canu_exec, "--version"], shell=False, stdout=subprocess.PIPE)
+    canu_version = p.stdout.readline().rstrip()
+    p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
-    if canu_version == "1.7":
+    if "1.7" in canu_version:
+        # special handling for this version
         command.append("gnuplotTested=true")
     command.append("stopOnReadQuality=false")
     """
@@ -1670,7 +1711,7 @@ usage: canu [-version] [-citation] \
 
     details["assembly"] = { 
                 'assembly_elapsed_time' : elapsedHumanReadable,
-                'assembler': 'canu',
+                'assembler': canu_version,
                 'command_line': " ".join(command)
                 }
 
@@ -1761,12 +1802,12 @@ def write_html_report(htmlFile, details):
         for key in sorted(details['assembly']):
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
         HTML.write("</table>\n")
+        if "problem" in details['assembly'] and details['assembly']['problem']:
+            HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
+            for prob in details['assembly']['problem']:
+                HTML.write("<li>"+prob+"\n")
     else:
         HTML.write("<p>None</p>\n")
-    if "problem" in details['assembly'] and details['assembly']['problem']:
-        HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
-        for prob in details['assembly']['problem']:
-            HTML.write("<li>"+prob+"\n")
         HTML.write("</ul></div>\n")
 
     if "quast_txt" in details:
@@ -1812,12 +1853,13 @@ def write_html_report(htmlFile, details):
             HTML.write("</ul>\n")
         HTML.write("</div>\n")
 
-    if "Bandage plot" in details:
-        #path, imageFile = os.path.split(details["Bandage plot"])
-        if os.path.exists(details["Bandage plot"]):
-            svg_text = open(details["Bandage plot"]).read()
+    if "Bandage" in details and "plot" in details["Bandage"]:
+        if os.path.exists(details["Bandage"]["plot"]):
+
+            svg_text = open(details["Bandage"]["plot"]).read()
             svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
             HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write(details["Bandage"]["version"]+"\n")
             HTML.write("<div class='a'>")
             HTML.write(svg_text+"\n\n")
             #HTML.write("<img src='%s'>\n"%imageFile)
@@ -1840,7 +1882,8 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
-
+    parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
+    
     parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
     parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
@@ -1848,7 +1891,7 @@ def main():
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
     parser.add_argument('--min_contig_length', type=int, default=300, help='save contigs of this length or longer', required=False)
     parser.add_argument('--min_contig_coverage', type=float, default=5, help='save contigs of this coverage or deeper', required=False)
-    parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
+    #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
@@ -1909,6 +1952,12 @@ def main():
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
 
+    if args.anonymous_reads:
+        categorize_anonymous_read_files(args, details)
+
+    if args.sra:
+        fetch_sra_files(args.sra, details)
+
     if args.illumina:
         platform = 'illumina'
         for item in args.illumina:
@@ -1929,16 +1978,20 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore')
 
-    if args.fasta:
-        for item in args.fasta:
-            registerReads(item, details, platform = 'fasta')
-
-    if args.sra:
-        fetch_sra_files(args.sra, details)
-
-    if args.anonymous_reads:
-        categorize_anonymous_read_files(args, details)
-
+    contigs = ""
+    if args.contigs:
+        if not os.path.exists(args.contigs):
+            comment = "Specified contigs file not found: "+args.contigs
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+            sys.stderr.write(comment+"\n")
+            exit()
+        comment = "input contigs specified as "+args.contigs
+        LOG.write(comment+"\n")
+        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
+        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
+        contigs = "input_contigs.fasta"
+            
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
 
@@ -1960,8 +2013,12 @@ def main():
             else:
                 args.recipe = "unicycler"
 
-    contigs = ""
-    if "spades" in args.recipe or args.recipe == "single-cell":
+    if args.contigs:
+        LOG.write("analyzing pre-existing contigs.\n")
+        if not os.path.exists(contigs):
+            LOG.write("Problem: cannot find input contigs as "+contigs+"\n")
+            exit()
+    elif "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
@@ -2010,11 +2067,14 @@ def main():
 
     gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
     if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
-        bandagePlot = runBandage(gfaFile, details)
-        details["Bandage plot"] = bandagePlot
+        runBandage(gfaFile, details)
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
-        json.dump(details, fp, indent=2, sort_keys=True)
+        try:
+            json.dump(details, fp, indent=2, sort_keys=True)
+        except UnicodeDecodeError as ude:
+            LOG.write("Problem writing details to json: "+str(ude)+"\n")
+
 
     htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
     write_html_report(htmlFile, details)
