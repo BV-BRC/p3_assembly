@@ -1080,6 +1080,9 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             report.append(comment)
     suboptimalContigs = ""
     num_good_contigs = num_bad_contigs = 0
+    total_seq_length = 0
+    weighted_short_read_coverage = 0
+    weighted_long_read_coverage = 0
     outputContigs = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputContigs)
     LOG.write("writing filtered contigs to %s\n"%outputContigs)
     with open(inputContigs) as IN:
@@ -1097,22 +1100,27 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
                         contigCoverage = 0
+                        short_read_coverage = 0
+                        long_read_coverage = 0
                         if shortReadDepth and seqId in shortReadDepth:
-                            meanDepth, normalizedDepth = shortReadDepth[seqId]
-                            contigInfo += " coverage %.01f normalized_cov %.2f"%(meanDepth, normalizedDepth)
-                            contigCoverage = meanDepth
+                            short_read_coverage, normalizedDepth = shortReadDepth[seqId]
+                            contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
                         if longReadDepth and seqId in longReadDepth:
-                            meanDepth, normalizedDepth = longReadDepth[seqId]
-                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(meanDepth, normalizedDepth)
-                            contigCoverage = max(meanDepth, contigCoverage)
+                            long_read_coverage, normalizedDepth = longReadDepth[seqId]
+                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
                         if "contigCircular" in details and contigIndex in details["contigCircular"]:
                             contigInfo += " circular=true"
                             details['circular_contigs'].append(contigId+contigInfo)
-                        if len(seq) >= min_contig_length and (no_coverage_available or contigCoverage >= min_contig_coverage):
+                        if len(seq) >= min_contig_length and (no_coverage_available or max(short_read_coverage, long_read_coverage) >= min_contig_coverage):
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
                             num_good_contigs += 1
+                            if short_read_coverage:
+                                weighted_short_read_coverage += short_read_coverage * len(seq)
+                            if long_read_coverage:
+                                weighted_long_read_coverage += long_read_coverage * len(seq)
+                            total_seq_length += len(seq)
                         else:
                             suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
                             bad_contigs.append(contigId+contigInfo)
@@ -1122,6 +1130,11 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         seqId = m.group(1)
                 elif line:
                     seq += line.rstrip()
+    if total_seq_length:
+        if weighted_short_read_coverage:
+            details['assembly']['short_read_coverage'] = weighted_short_read_coverage / total_seq_length
+        if weighted_long_read_coverage:
+            details['assembly']['long_read_coverage'] = weighted_long_read_coverage / total_seq_length
     report.append("Number of contigs above thresholds: %d"%num_good_contigs)
     report.append("Number of contigs below thresholds: %d"%num_bad_contigs)
     if suboptimalContigs:
@@ -1136,7 +1149,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
         LOG.write("failed to generate outputContigs, return None\n")
         return None
     details['contig_filtering'] = report
-    comment = "trimContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
+    comment = "filterContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     return outputContigs
@@ -1149,7 +1162,7 @@ def runBandage(gfaFile, details):
         command = ["Bandage", "image", gfaFile, plotFile]
         LOG.write("Bandage command =\n"+" ".join(command)+"\n")
         try:
-            return_code = subprocess.call(command, shell=False, stderr=LOG)
+            return_code = subprocess.call(command, shell=False)
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
                 retval = plotFile
@@ -1800,6 +1813,8 @@ def write_html_report(htmlFile, details):
     if 'assembly' in details:
         HTML.write("<table class='a'>")
         for key in sorted(details['assembly']):
+            if key == "problem":
+                continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
         HTML.write("</table>\n")
         if "problem" in details['assembly'] and details['assembly']['problem']:
