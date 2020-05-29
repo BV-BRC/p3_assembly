@@ -1755,17 +1755,18 @@ usage: canu [-version] [-citation] \
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
-    HTML.write("<head><style>\n.a { left-margin: 50px }\n")
-    HTML.write(".b {left-margin: 75px }\n")
+    HTML.write("<head><style>\n.a { margin-left: 3em; margin-top: 1em; margin-bottom: 1em}\n")
+    HTML.write(".b {margin-left: 3em }\n")
+    HTML.write("span.header { font-size: large; font-weight: bold; margin-left: -2em}\n")
     HTML.write("</style></head>\n")
     HTML.write("<h1>Genome Assembly Report</h1>\n")
     HTML.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
 
-    HTML.write("<h3>Input reads:</h3>\n")
+    HTML.write("<div class='a'><span class='header'>Input Reads:</span><br>\n")
     for item in details['reads']:
         if 'supercedes' in details['reads'][item]:
             continue # this is a derived item, not original input
-        HTML.write(item+"<table class='a'>")
+        HTML.write("<b>"+item+"</b>\n<table>")
         for key in ('platform', 'layout', 'avg_len', 'max_read_len', 'min_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
             if key in details['reads'][item]:
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
@@ -1775,16 +1776,16 @@ def write_html_report(htmlFile, details):
             for prob in details['reads'][item]['problem']:
                 HTML.write("<li>"+prob+"\n")
             HTML.write("</ul></div>\n")
+        HTML.write("</div>\n")
     
     if details["pre-assembly transformation"]:
-        HTML.write("<h3>Pre-Assembly Transformations</h3>\n<div class='a'>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Pre-Assembly Transformations:</span><br>\n")
         for line in details["pre-assembly transformation"]:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "trim report" in details:
-        HTML.write("<h3>Trimming Report</h3>\n<div class='a'>\n")
+        HTML.write("<div class='a'><span class='header'>Trimming Report:</span><br>\n")
         for reads in details["trim report"]:
             HTML.write("<b>"+reads+"</b><ul>")
             for report in details["trim report"][reads]:
@@ -1795,23 +1796,25 @@ def write_html_report(htmlFile, details):
         HTML.write("</div>\n")
 
     if details['derived_reads']:
-        HTML.write("<h3>Transformed reads:</h3>\n")
+        HTML.write("<div class='a'><span class='header'>Transformed Reads:</span><br>\n")
         for item in details['derived_reads']:
-            HTML.write(item+"<table class='a'>")
+            HTML.write("<b>"+item+"</b><br>\n")
+            HTML.write(item+"<table>")
             for key in sorted(details['reads'][item]):
                 if key == 'problem':
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
             if "problem" in details['reads'][item] and details['reads'][item]['problem']:
-                HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
+                HTML.write("<div class='b'><b>Problems with read set "+item+"</b><br>\n")
                 for prob in details['reads'][item]['problem']:
-                    HTML.write("<li>"+prob+"\n")
-                HTML.write("</ul></div>\n")
+                    HTML.write(prob+"<br>\n")
+                HTML.write("</div>\n")
+        HTML.write("</div>\n")
 
-    HTML.write("<h3>Assembly</h3>\n")
+    HTML.write("<div class='a'><span class='header'>Assembly:</span><br>\n")
     if 'assembly' in details:
-        HTML.write("<table class='a'>")
+        HTML.write("<table>")
         for key in sorted(details['assembly']):
             if key == "problem":
                 continue
@@ -1821,51 +1824,45 @@ def write_html_report(htmlFile, details):
             HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
             for prob in details['assembly']['problem']:
                 HTML.write("<li>"+prob+"\n")
+            HTML.write("</ul></div>\n")
     else:
         HTML.write("<p>None</p>\n")
-        HTML.write("</ul></div>\n")
+    HTML.write("</div>\n")
 
     if "quast_txt" in details:
-        HTML.write("<h3>Quast Report</h3>\n")
-        HTML.write("<table class='a'>")
-        HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
-        HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
+        HTML.write("<div class='a'><span class='header'>Quast Report:</span><br>\n")
+        HTML.write("<a href='%s'>%s</a><br>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
         if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
             HTML.write("<pre>\n")
             HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
             HTML.write("\n</pre>\n")
+        HTML.write("</div>\n")
     
     if details["post-assembly transformation"]:
-        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n<ul>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Post-Assembly Transformations:</span><br>\n")
         for line in details['post-assembly transformation']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "circular_contigs" in details and details['circular_contigs']:
-        HTML.write("<h3>Circular Contigs</h3>\n<div class='a'>\n")
+        HTML.write("<div class='a'><span class='header'>Circular Contigs:</span><br>\n")
         HTML.write("<b>As suggested by Unicycler</b>\n")
-        HTML.write("<ul>\n")
         for line in details['circular_contigs']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "contig_filtering" in details and details['contig_filtering']:
-        HTML.write("<h3>Contig Filtering</h3>\n<div class='a'>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Contig Filtering:</span><br>\n")
         for line in details['contig_filtering']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul>\n")
+            HTML.write(line+"<br>\n")
 
         if "bad_contigs" in details and details["bad_contigs"]:
-            HTML.write("<b>Contigs Below Thresholds</b>\n")
-            if len(details["bad_contigs"]) > 10:
-                HTML.write("<b>Showing first 10 entries</b>\n")
-            HTML.write("<ul>\n")
+            HTML.write("<b>Contigs Below Thresholds</b><br>\n")
+            if len(details["bad_contigs"]) > 5:
+                HTML.write("<b>Showing first 5 entries</b><br>\n")
             for line in details['bad_contigs'][:10]:
-                HTML.write("<li>"+line+"\n")
-            HTML.write("</ul>\n")
+                HTML.write(line+"<br>\n")
         HTML.write("</div>\n")
 
     if "Bandage" in details and "plot" in details["Bandage"]:
@@ -1873,11 +1870,9 @@ def write_html_report(htmlFile, details):
 
             svg_text = open(details["Bandage"]["plot"]).read()
             svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
-            HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write("<div class='a'><span class='header'>Bandage Plot:</span><br>\n")
             HTML.write(details["Bandage"]["version"]+"\n")
-            HTML.write("<div class='a'>")
             HTML.write(svg_text+"\n\n")
-            #HTML.write("<img src='%s'>\n"%imageFile)
             HTML.write("</div>\n")
     HTML.write("</html>\n")
     HTML.close()
