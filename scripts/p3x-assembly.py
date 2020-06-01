@@ -8,11 +8,15 @@ import os
 import os.path
 import re
 import shutil
-import urllib2
-from time import time, localtime, strftime
+try:
+    import urllib.request as urllib2 # python3
+except ImportError:
+    import urllib2 #python2
+from time import time, localtime, strftime, sleep
 import json
 #import sra_tools
 import glob
+import pdb
 
 """
 This script organizes a command line for either 
@@ -494,11 +498,12 @@ def trimGalore(details, threads=1):
                     shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
             command = ["trim_galore", "--version"]
             proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-            version_text = proc.stdout.read().strip()
+            version_text = proc.stdout.read().decode().strip()
             proc.wait()
             m = re.search(r"(version\s+\S+)", version_text)
             if m:
                 details["trim report"]['trim program'] = "trim_galore "+m.group(1)
+                details["version"]['trim_galore'] = m.group(1)
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -712,7 +717,7 @@ def get_sra_runinfo(run_accession, log=None):
     """ take sra run accession (like SRR123456)
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
-    Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
+    Altered from version in sra_tools to handle case of multiple sra runs returned by query.
     If efetch doesn't work, try scraping the web page.
     """
     LOG.write("get_sra_runinfo(%s)\n"%run_accession)
@@ -1015,7 +1020,7 @@ def runQuast(contigsFile, args, details):
                     contigsFile]
     LOG.write("running quast: "+" ".join(quastCommand)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
-        return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL)
+        return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
     if return_code == 0:
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.html"))
@@ -1030,9 +1035,9 @@ def runQuast(contigsFile, args, details):
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
         quastCommand = ["quast.py", "--version"]
         proc = subprocess.Popen(quastCommand, shell=False, stdout=subprocess.PIPE)
-        version_text = proc.stdout.read()
+        version_text = proc.stdout.read().decode()
         proc.wait()
-        details["quast_version"] = version_text
+        details["version"]["quast"] = version_text
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
@@ -1162,18 +1167,20 @@ def runBandage(gfaFile, details):
         command = ["Bandage", "image", gfaFile, plotFile]
         LOG.write("Bandage command =\n"+" ".join(command)+"\n")
         try:
-            return_code = subprocess.call(command, shell=False)
+            with open(os.devnull, 'w') as FNULL:
+                return_code = subprocess.call(command, shell=False, stderr=FNULL)
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
                 retval = plotFile
                 proc = subprocess.Popen(["Bandage", "--version"], shell=False, stdout=subprocess.PIPE)
-                version_text = proc.stdout.read().strip()
+                version_text = proc.stdout.read().decode().strip()
                 proc.wait()
                 details["Bandage"] = {
-                    "version" : "Bandage "+version_text,
+                        "version" : "Bandage "+version_text,
                     "plot" : plotFile,
                     "command line": command
                     }
+                details["version"]["Bandage"] = version_text
             else:
                 LOG.write("Error creating Bandage plot\n")
         except OSError as ose:
@@ -1186,13 +1193,15 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
-    version_text = proc.stdout.read()
-    version_text = version_text.split("\n")[1]
+    version_text = proc.stdout.read().decode()
+    if version_text:
+        version_text = version_text.split("\n")[1]
     proc.wait()
     details["assembly"] = { 
                 'assembler': version_text,
                 'problem' : []
                 }
+    details["version"]["unicycler"] = version_text
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
@@ -1299,12 +1308,13 @@ def runSpades(details, args):
 
     command = ["spades.py", "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-    version_text = proc.stdout.read().strip()
+    version_text = proc.stdout.read().decode().strip()
     proc.wait()
     details["assembly"] = { 
         'assembler': version_text,
         'problem' : []
         }
+    details["version"]["spades.py"] = version_text
 
 
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
@@ -1443,11 +1453,20 @@ def convertSamToBam(samFile, details, threads=1):
     #convert format to bam and index
     LOG.write("convertSamToBam(%s, details, %d)\n"%(samFile, threads))
     tempTime = time()
+    if 'samtools' not in details['version']:
+        command = ["samtools"]
+        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stderr.read().decode()
+        for line in version_text.splitlines():
+            if 'Version' in line:
+                details["version"]['samtools'] = line.strip()
+
     sortThreads = max(int(threads/2), 1)
     bamFileUnsorted = re.sub(".sam", "_unsorted.bam", samFile, re.IGNORECASE)
-    command = "samtools view -bS -@ %d -o %s %s"%(sortThreads, bamFileUnsorted, samFile)
-    LOG.write("executing:\n"+command+"\n")
-    return_code = subprocess.call(command, shell=True, stderr=LOG)
+    command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", bamFileUnsorted, samFile]
+    LOG.write("executing:\n"+" ".join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stderr=LOG)
     LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
@@ -1455,18 +1474,36 @@ def convertSamToBam(samFile, details, threads=1):
         details["problem"].append(comment)
         return None
 
+    LOG.flush()
     #os.remove(samFile) #save a little space
     bamFileSorted = re.sub(".sam", ".bam", samFile, re.IGNORECASE)
-    command = "samtools sort -@ %d -o %s %s"%(sortThreads, bamFileSorted, bamFileUnsorted)
-    LOG.write("executing:\n"+command+"\n")
-    LOG.flush()
-    return_code = subprocess.call(command, shell=True, stderr=LOG)
-    LOG.write("samtools sort return code = %d, time=%d\n"%(return_code, time()-tempTime))
+    LOG.write("bamFileSorted = "+bamFileSorted+"\n")
+
+    #command = ["samtools", "sort", "-o", bamFileSorted, bamFileUnsorted]
+    #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
+
+    command = ["samtools", "sort", "-@", str(sortThreads), bamFileUnsorted]
+    LOG.write("executing:\n"+' '.join(command)+"\n")
+    BAM = open(bamFileSorted, 'wb')
+    p = subprocess.Popen(command, shell=False, stdout=BAM)
+    return_code = p.wait()
+
     if return_code != 0:
-        comment = "samtools sort returned %d"%return_code
+        comment = "samtools sort returned %d, convertSamToBam failed"%return_code
         LOG.write(comment+"\n")
         details["problem"].append(comment)
         return None
+    if not os.path.exists(bamFileSorted):
+        comment = "{0} not found, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        return None
+    if not os.path.getsize(bamFileSorted):
+        comment = "{0} of size zero, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        return None
+    LOG.write("samtools sort return code=%d, time=%d, size of %s is %d\n"%(return_code, time()-tempTime, bamFileSorted, os.path.getsize(bamFileSorted)))
 
     command = ["samtools", "index", bamFileSorted]
     LOG.write("executing:\n"+" ".join(command)+"\n")
@@ -1593,7 +1630,7 @@ def calcReadDepth(bamfiles):
         command.extend(bamfiles)
     LOG.write("command = "+" ".join(command)+"\n")
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    depthData = proc.communicate()[0]
+    depthData = proc.communicate()[0].decode()
     LOG.write("length of depthData string = %d\n"%len(depthData))
     depthSum = 0
     totalDepthSum = 0
@@ -1671,7 +1708,8 @@ usage: canu [-version] [-citation] \
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     # first get canu version
     p = subprocess.Popen([canu_exec, "--version"], shell=False, stdout=subprocess.PIPE)
-    canu_version = p.stdout.readline().rstrip()
+    canu_version = p.stdout.readline().decode().rstrip()
+    details['version']['canu'] = canu_version
     p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
@@ -1858,11 +1896,13 @@ def write_html_report(htmlFile, details):
             HTML.write(line+"<br>\n")
 
         if "bad_contigs" in details and details["bad_contigs"]:
-            HTML.write("<b>Contigs Below Thresholds</b><br>\n")
+            HTML.write("<b>Contigs Below Thresholds</b> ")
             if len(details["bad_contigs"]) > 5:
-                HTML.write("<b>Showing first 5 entries</b><br>\n")
-            for line in details['bad_contigs'][:10]:
+                HTML.write("(Showing first 5 entries)\n")
+            HTML.write("<div class='b'>\n")
+            for line in details['bad_contigs'][:5]:
                 HTML.write(line+"<br>\n")
+            HTML.write("</div>\n")
         HTML.write("</div>\n")
 
     if "Bandage" in details and "plot" in details["Bandage"]:
@@ -1946,7 +1986,7 @@ def main():
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
-    LOG = open(logfileName, 'w', 0) #unbuffered 
+    LOG = open(logfileName, 'w') 
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(START_TIME))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
@@ -1958,6 +1998,7 @@ def main():
     details["post-assembly transformation"] = []
     details["original_items"] = []
     details["reads"] = {}
+    details["version"] = {}
     details["problem"] = []
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
