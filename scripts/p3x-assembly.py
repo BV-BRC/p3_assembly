@@ -1189,7 +1189,7 @@ def runBandage(gfaFile, details):
             details['problem'].append(comment)
     return retval
 
-def runUnicycler(details, threads=1, min_contig_length=0, prefix="", min_kmer_frac=0, debug=False):
+def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
@@ -1205,14 +1205,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix="", min_kmer_fr
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
-    if debug:
-        command.extend(("--keep", "3")) # keep all files
-    else:
-        command.extend(("--keep", "2")) # keep files needed for re-run if necessary
+    command.extend(("--keep", "2")) # keep files needed for re-run if necessary
     command.append("--no_pilon")  # we will run our own, if requested
-    if min_kmer_frac > 0:
-        command.extend(("--min_kmer_frac", str(min_kmer_frac)))
-  # --min_kmer_frac MIN_KMER_FRAC  Lowest k-mer size for SPAdes assembly, expressed as a fraction of the read length (default: 0.2)
 
     # put all read files on command line, let Unicycler figure out which type each is
     # apparently unicycler can only accept one read set in each class (I tried multiple ways to submit 2 paired-end sets, failed)
@@ -1940,7 +1934,6 @@ def main():
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     
-    parser.add_argument('--min_kmer_frac', type=float, default=0, help='for unicycler, min kmer size as frac. read length: can speed things up', required=False)
     parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
     parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
@@ -2079,7 +2072,7 @@ def main():
     elif "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
-        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix, min_kmer_frac=args.min_kmer_frac)
+        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix )
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     else:
