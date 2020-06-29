@@ -8,11 +8,15 @@ import os
 import os.path
 import re
 import shutil
-import urllib2
-from time import time, localtime, strftime
+try:
+    import urllib.request as urllib2 # python3
+except ImportError:
+    import urllib2 #python2
+from time import time, localtime, strftime, sleep
 import json
 #import sra_tools
 import glob
+import pdb
 
 """
 This script organizes a command line for either 
@@ -494,11 +498,12 @@ def trimGalore(details, threads=1):
                     shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
             command = ["trim_galore", "--version"]
             proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-            version_text = proc.stdout.read().strip()
+            version_text = proc.stdout.read().decode().strip()
             proc.wait()
             m = re.search(r"(version\s+\S+)", version_text)
             if m:
                 details["trim report"]['trim program'] = "trim_galore "+m.group(1)
+                details["version"]['trim_galore'] = m.group(1)
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads])
 
@@ -712,7 +717,7 @@ def get_sra_runinfo(run_accession, log=None):
     """ take sra run accession (like SRR123456)
     Use edirect tools esearch and efetch to get metadata (sequencing platform, etc).
     return dictionary with keys like: spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path.....
-    Altered from versionin sra_tools to handle case of multiple sra runs returned by query.
+    Altered from version in sra_tools to handle case of multiple sra runs returned by query.
     If efetch doesn't work, try scraping the web page.
     """
     LOG.write("get_sra_runinfo(%s)\n"%run_accession)
@@ -1015,7 +1020,7 @@ def runQuast(contigsFile, args, details):
                     contigsFile]
     LOG.write("running quast: "+" ".join(quastCommand)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
-        return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL)
+        return_code = subprocess.call(quastCommand, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("return code = %d\n"%return_code)
     if return_code == 0:
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.html"))
@@ -1030,9 +1035,9 @@ def runQuast(contigsFile, args, details):
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
         quastCommand = ["quast.py", "--version"]
         proc = subprocess.Popen(quastCommand, shell=False, stdout=subprocess.PIPE)
-        version_text = proc.stdout.read()
+        version_text = proc.stdout.read().decode()
         proc.wait()
-        details["quast_version"] = version_text
+        details["version"]["quast"] = version_text
 
 def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
@@ -1080,6 +1085,9 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             report.append(comment)
     suboptimalContigs = ""
     num_good_contigs = num_bad_contigs = 0
+    total_seq_length = 0
+    weighted_short_read_coverage = 0
+    weighted_long_read_coverage = 0
     outputContigs = re.sub(r"\..*", "_depth_cov_filtered.fasta", inputContigs)
     LOG.write("writing filtered contigs to %s\n"%outputContigs)
     with open(inputContigs) as IN:
@@ -1097,22 +1105,27 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
                         contigCoverage = 0
+                        short_read_coverage = 0
+                        long_read_coverage = 0
                         if shortReadDepth and seqId in shortReadDepth:
-                            meanDepth, normalizedDepth = shortReadDepth[seqId]
-                            contigInfo += " coverage %.01f normalized_cov %.2f"%(meanDepth, normalizedDepth)
-                            contigCoverage = meanDepth
+                            short_read_coverage, normalizedDepth = shortReadDepth[seqId]
+                            contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
                         if longReadDepth and seqId in longReadDepth:
-                            meanDepth, normalizedDepth = longReadDepth[seqId]
-                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(meanDepth, normalizedDepth)
-                            contigCoverage = max(meanDepth, contigCoverage)
+                            long_read_coverage, normalizedDepth = longReadDepth[seqId]
+                            contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
                         if "contigCircular" in details and contigIndex in details["contigCircular"]:
                             contigInfo += " circular=true"
                             details['circular_contigs'].append(contigId+contigInfo)
-                        if len(seq) >= min_contig_length and (no_coverage_available or contigCoverage >= min_contig_coverage):
+                        if len(seq) >= min_contig_length and (no_coverage_available or max(short_read_coverage, long_read_coverage) >= min_contig_coverage):
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
                             num_good_contigs += 1
+                            if short_read_coverage:
+                                weighted_short_read_coverage += short_read_coverage * len(seq)
+                            if long_read_coverage:
+                                weighted_long_read_coverage += long_read_coverage * len(seq)
+                            total_seq_length += len(seq)
                         else:
                             suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
                             bad_contigs.append(contigId+contigInfo)
@@ -1122,6 +1135,11 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         seqId = m.group(1)
                 elif line:
                     seq += line.rstrip()
+    if total_seq_length:
+        if weighted_short_read_coverage:
+            details['assembly']['short_read_coverage'] = weighted_short_read_coverage / total_seq_length
+        if weighted_long_read_coverage:
+            details['assembly']['long_read_coverage'] = weighted_long_read_coverage / total_seq_length
     report.append("Number of contigs above thresholds: %d"%num_good_contigs)
     report.append("Number of contigs below thresholds: %d"%num_bad_contigs)
     if suboptimalContigs:
@@ -1136,7 +1154,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
         LOG.write("failed to generate outputContigs, return None\n")
         return None
     details['contig_filtering'] = report
-    comment = "trimContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
+    comment = "filterContigsByMinLength, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     return outputContigs
@@ -1149,18 +1167,20 @@ def runBandage(gfaFile, details):
         command = ["Bandage", "image", gfaFile, plotFile]
         LOG.write("Bandage command =\n"+" ".join(command)+"\n")
         try:
-            return_code = subprocess.call(command, shell=False, stderr=LOG)
+            with open(os.devnull, 'w') as FNULL:
+                return_code = subprocess.call(command, shell=False, stderr=FNULL)
             LOG.write("return code = %d\n"%return_code)
             if return_code == 0:
                 retval = plotFile
                 proc = subprocess.Popen(["Bandage", "--version"], shell=False, stdout=subprocess.PIPE)
-                version_text = proc.stdout.read().strip()
+                version_text = proc.stdout.read().decode().strip()
                 proc.wait()
                 details["Bandage"] = {
-                    "version" : "Bandage "+version_text,
+                        "version" : "Bandage "+version_text,
                     "plot" : plotFile,
                     "command line": command
                     }
+                details["version"]["Bandage"] = version_text
             else:
                 LOG.write("Error creating Bandage plot\n")
         except OSError as ose:
@@ -1173,13 +1193,15 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
-    version_text = proc.stdout.read()
-    version_text = version_text.split("\n")[1]
+    version_text = proc.stdout.read().decode()
+    if version_text:
+        version_text = version_text.split("\n")[1]
     proc.wait()
     details["assembly"] = { 
                 'assembler': version_text,
                 'problem' : []
                 }
+    details["version"]["unicycler"] = version_text
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
         command.extend(("--min_fasta_length", str(min_contig_length)))
@@ -1286,12 +1308,13 @@ def runSpades(details, args):
 
     command = ["spades.py", "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-    version_text = proc.stdout.read().strip()
+    version_text = proc.stdout.read().decode().strip()
     proc.wait()
     details["assembly"] = { 
         'assembler': version_text,
         'problem' : []
         }
+    details["version"]["spades.py"] = version_text
 
 
     command = ["spades.py", "--threads", str(args.threads), "-o", "."]
@@ -1430,11 +1453,20 @@ def convertSamToBam(samFile, details, threads=1):
     #convert format to bam and index
     LOG.write("convertSamToBam(%s, details, %d)\n"%(samFile, threads))
     tempTime = time()
+    if 'samtools' not in details['version']:
+        command = ["samtools"]
+        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stderr.read().decode()
+        for line in version_text.splitlines():
+            if 'Version' in line:
+                details["version"]['samtools'] = line.strip()
+
     sortThreads = max(int(threads/2), 1)
     bamFileUnsorted = re.sub(".sam", "_unsorted.bam", samFile, re.IGNORECASE)
-    command = "samtools view -bS -@ %d -o %s %s"%(sortThreads, bamFileUnsorted, samFile)
-    LOG.write("executing:\n"+command+"\n")
-    return_code = subprocess.call(command, shell=True, stderr=LOG)
+    command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", bamFileUnsorted, samFile]
+    LOG.write("executing:\n"+" ".join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stderr=LOG)
     LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
@@ -1442,18 +1474,36 @@ def convertSamToBam(samFile, details, threads=1):
         details["problem"].append(comment)
         return None
 
+    LOG.flush()
     #os.remove(samFile) #save a little space
     bamFileSorted = re.sub(".sam", ".bam", samFile, re.IGNORECASE)
-    command = "samtools sort -@ %d -o %s %s"%(sortThreads, bamFileSorted, bamFileUnsorted)
-    LOG.write("executing:\n"+command+"\n")
-    LOG.flush()
-    return_code = subprocess.call(command, shell=True, stderr=LOG)
-    LOG.write("samtools sort return code = %d, time=%d\n"%(return_code, time()-tempTime))
+    LOG.write("bamFileSorted = "+bamFileSorted+"\n")
+
+    #command = ["samtools", "sort", "-o", bamFileSorted, bamFileUnsorted]
+    #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
+
+    command = ["samtools", "sort", "-@", str(sortThreads), bamFileUnsorted]
+    LOG.write("executing:\n"+' '.join(command)+"\n")
+    BAM = open(bamFileSorted, 'wb')
+    p = subprocess.Popen(command, shell=False, stdout=BAM)
+    return_code = p.wait()
+
     if return_code != 0:
-        comment = "samtools sort returned %d"%return_code
+        comment = "samtools sort returned %d, convertSamToBam failed"%return_code
         LOG.write(comment+"\n")
         details["problem"].append(comment)
         return None
+    if not os.path.exists(bamFileSorted):
+        comment = "{0} not found, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        return None
+    if not os.path.getsize(bamFileSorted):
+        comment = "{0} of size zero, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
+        return None
+    LOG.write("samtools sort return code=%d, time=%d, size of %s is %d\n"%(return_code, time()-tempTime, bamFileSorted, os.path.getsize(bamFileSorted)))
 
     command = ["samtools", "index", bamFileSorted]
     LOG.write("executing:\n"+" ".join(command)+"\n")
@@ -1580,7 +1630,7 @@ def calcReadDepth(bamfiles):
         command.extend(bamfiles)
     LOG.write("command = "+" ".join(command)+"\n")
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    depthData = proc.communicate()[0]
+    depthData = proc.communicate()[0].decode()
     LOG.write("length of depthData string = %d\n"%len(depthData))
     depthSum = 0
     totalDepthSum = 0
@@ -1658,7 +1708,8 @@ usage: canu [-version] [-citation] \
     # canu -d /localscratch/allan/canu_assembly -p p6_25X gnuplotTested=true genomeSize=5m useGrid=false -pacbio-raw pacbio_p6_25X.fastq
     # first get canu version
     p = subprocess.Popen([canu_exec, "--version"], shell=False, stdout=subprocess.PIPE)
-    canu_version = p.stdout.readline().rstrip()
+    canu_version = p.stdout.readline().decode().rstrip()
+    details['version']['canu'] = canu_version
     p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
@@ -1742,17 +1793,18 @@ usage: canu [-version] [-citation] \
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
-    HTML.write("<head><style>\n.a { left-margin: 50px }\n")
-    HTML.write(".b {left-margin: 75px }\n")
+    HTML.write("<head><style>\n.a { margin-left: 3em; margin-top: 1em; margin-bottom: 1em}\n")
+    HTML.write(".b {margin-left: 3em }\n")
+    HTML.write("span.header { font-size: large; font-weight: bold; margin-left: -2em}\n")
     HTML.write("</style></head>\n")
     HTML.write("<h1>Genome Assembly Report</h1>\n")
     HTML.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
 
-    HTML.write("<h3>Input reads:</h3>\n")
+    HTML.write("<div class='a'><span class='header'>Input Reads:</span><br>\n")
     for item in details['reads']:
         if 'supercedes' in details['reads'][item]:
             continue # this is a derived item, not original input
-        HTML.write(item+"<table class='a'>")
+        HTML.write("<b>"+item+"</b>\n<table>")
         for key in ('platform', 'layout', 'avg_len', 'max_read_len', 'min_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
             if key in details['reads'][item]:
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
@@ -1762,16 +1814,16 @@ def write_html_report(htmlFile, details):
             for prob in details['reads'][item]['problem']:
                 HTML.write("<li>"+prob+"\n")
             HTML.write("</ul></div>\n")
+        HTML.write("</div>\n")
     
     if details["pre-assembly transformation"]:
-        HTML.write("<h3>Pre-Assembly Transformations</h3>\n<div class='a'>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Pre-Assembly Transformations:</span><br>\n")
         for line in details["pre-assembly transformation"]:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "trim report" in details:
-        HTML.write("<h3>Trimming Report</h3>\n<div class='a'>\n")
+        HTML.write("<div class='a'><span class='header'>Trimming Report:</span><br>\n")
         for reads in details["trim report"]:
             HTML.write("<b>"+reads+"</b><ul>")
             for report in details["trim report"][reads]:
@@ -1782,75 +1834,75 @@ def write_html_report(htmlFile, details):
         HTML.write("</div>\n")
 
     if details['derived_reads']:
-        HTML.write("<h3>Transformed reads:</h3>\n")
+        HTML.write("<div class='a'><span class='header'>Transformed Reads:</span><br>\n")
         for item in details['derived_reads']:
-            HTML.write(item+"<table class='a'>")
+            HTML.write("<b>"+item+"</b><br>\n")
+            HTML.write(item+"<table>")
             for key in sorted(details['reads'][item]):
                 if key == 'problem':
                     continue
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
             HTML.write("</table>\n")
             if "problem" in details['reads'][item] and details['reads'][item]['problem']:
-                HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
+                HTML.write("<div class='b'><b>Problems with read set "+item+"</b><br>\n")
                 for prob in details['reads'][item]['problem']:
-                    HTML.write("<li>"+prob+"\n")
-                HTML.write("</ul></div>\n")
+                    HTML.write(prob+"<br>\n")
+                HTML.write("</div>\n")
+        HTML.write("</div>\n")
 
-    HTML.write("<h3>Assembly</h3>\n")
+    HTML.write("<div class='a'><span class='header'>Assembly:</span><br>\n")
     if 'assembly' in details:
-        HTML.write("<table class='a'>")
+        HTML.write("<table>")
         for key in sorted(details['assembly']):
+            if key == "problem":
+                continue
             HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
         HTML.write("</table>\n")
         if "problem" in details['assembly'] and details['assembly']['problem']:
             HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
             for prob in details['assembly']['problem']:
                 HTML.write("<li>"+prob+"\n")
+            HTML.write("</ul></div>\n")
     else:
         HTML.write("<p>None</p>\n")
-        HTML.write("</ul></div>\n")
+    HTML.write("</div>\n")
 
     if "quast_txt" in details:
-        HTML.write("<h3>Quast Report</h3>\n")
-        HTML.write("<table class='a'>")
-        HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_txt"], "Quast text report"))
-        HTML.write("<li><a href='%s'>%s</a>\n"%(details["quast_html"], "Quast html report"))
+        HTML.write("<div class='a'><span class='header'>Quast Report:</span><br>\n")
+        HTML.write("<a href='%s'>%s</a><br>\n"%(details["quast_html"], "Quast html report"))
         HTML.write("</table>\n")
         if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
             HTML.write("<pre>\n")
             HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
             HTML.write("\n</pre>\n")
+        HTML.write("</div>\n")
     
     if details["post-assembly transformation"]:
-        HTML.write("<h3>Post-Assembly Transformations</h3>\n<div class='a'>\n<ul>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Post-Assembly Transformations:</span><br>\n")
         for line in details['post-assembly transformation']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "circular_contigs" in details and details['circular_contigs']:
-        HTML.write("<h3>Circular Contigs</h3>\n<div class='a'>\n")
+        HTML.write("<div class='a'><span class='header'>Circular Contigs:</span><br>\n")
         HTML.write("<b>As suggested by Unicycler</b>\n")
-        HTML.write("<ul>\n")
         for line in details['circular_contigs']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul></div>\n")
+            HTML.write(line+"<br>\n")
+        HTML.write("</div>\n")
 
     if "contig_filtering" in details and details['contig_filtering']:
-        HTML.write("<h3>Contig Filtering</h3>\n<div class='a'>\n")
-        HTML.write("<ul>\n")
+        HTML.write("<div class='a'><span class='header'>Contig Filtering:</span><br>\n")
         for line in details['contig_filtering']:
-            HTML.write("<li>"+line+"\n")
-        HTML.write("</ul>\n")
+            HTML.write(line+"<br>\n")
 
         if "bad_contigs" in details and details["bad_contigs"]:
-            HTML.write("<b>Contigs Below Thresholds</b>\n")
-            if len(details["bad_contigs"]) > 10:
-                HTML.write("<b>Showing first 10 entries</b>\n")
-            HTML.write("<ul>\n")
-            for line in details['bad_contigs'][:10]:
-                HTML.write("<li>"+line+"\n")
-            HTML.write("</ul>\n")
+            HTML.write("<b>Contigs Below Thresholds</b> ")
+            if len(details["bad_contigs"]) > 5:
+                HTML.write("(Showing first 5 entries)\n")
+            HTML.write("<div class='b'>\n")
+            for line in details['bad_contigs'][:5]:
+                HTML.write(line+"<br>\n")
+            HTML.write("</div>\n")
         HTML.write("</div>\n")
 
     if "Bandage" in details and "plot" in details["Bandage"]:
@@ -1858,11 +1910,9 @@ def write_html_report(htmlFile, details):
 
             svg_text = open(details["Bandage"]["plot"]).read()
             svg_text = re.sub(r'<svg width="[\d\.]+mm" height="[\d\.]+mm"', '<svg width="200mm" height="150mm"', svg_text)
-            HTML.write("<h3>Bandage Plot</h3>\n")
+            HTML.write("<div class='a'><span class='header'>Bandage Plot:</span><br>\n")
             HTML.write(details["Bandage"]["version"]+"\n")
-            HTML.write("<div class='a'>")
             HTML.write(svg_text+"\n\n")
-            #HTML.write("<img src='%s'>\n"%imageFile)
             HTML.write("</div>\n")
     HTML.write("</html>\n")
     HTML.close()
@@ -1936,7 +1986,7 @@ def main():
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
-    LOG = open(logfileName, 'w', 0) #unbuffered 
+    LOG = open(logfileName, 'w') 
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(START_TIME))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
@@ -1948,6 +1998,7 @@ def main():
     details["post-assembly transformation"] = []
     details["original_items"] = []
     details["reads"] = {}
+    details["version"] = {}
     details["problem"] = []
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
@@ -2021,7 +2072,7 @@ def main():
     elif "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
-        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix)
+        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix )
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     else:
