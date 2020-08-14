@@ -674,15 +674,14 @@ def categorize_anonymous_read_files(args, details):
         for idpair in zip(read_id_sample[filename1], read_id_sample[filename2]):
             if idpair[0] == idpair[1]:
                 continue
-            diff = findSingleDifference(idpair[0], idpair[1])
-            # diff reports start and end of contiguous region of different characters (if only one)
-            if not diff or sorted(idpair[0][diff[0]:diff[1]], idpair[1][diff[0]:diff[1]]) != ('1', '2'):
-                ids_paired = False
-                comment = "Read IDs do not match for %s(%s) vs %s(%s)"%(filename1, idpair[0], filename2, idpair[1])
-                LOG.write(comment+"\n")
-                details["problem"].append(comment)
-                singleFiles.extend((filename1, filename2)) #move over to single files
-                break
+            if idpair[0][:-1] == idpair[1][:-1]:
+                continue
+            ids_paired = False
+            comment = "Read IDs do not match for %s(%s) vs %s(%s)"%(filename1, idpair[0], filename2, idpair[1])
+            LOG.write(comment+"\n")
+            details["problem"].append(comment)
+            singleFiles.extend((filename1, filename2)) #move over to single files
+            break
         if read_types_match and ids_paired:
             valid_pairs.add(item)
             membersOfPairs.add(filename1)
@@ -920,6 +919,7 @@ def writeSpadesYamlFile(details):
     if 'iontorrent' in details['platform']:
         shortReadItems.extend(details['platform']['iontorrent'])
     for item in shortReadItems:
+        LOG.write("process item {}\n".format(item))
         if ":" in item:
             f = details['reads'][item]['file'][0]
             paired_end_reads[0].append(f)
@@ -2078,7 +2078,7 @@ def main():
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
-    if contigs and os.path.getsize(contigs) and args.racon_iterations:
+    if contigs and os.path.getsize(contigs):
         LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
         if args.racon_iterations:
             # now run racon with each long-read file
