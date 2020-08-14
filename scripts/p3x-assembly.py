@@ -2027,7 +2027,7 @@ def main():
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
-    if contigs and os.path.getsize(contigs) and args.racon_iterations:
+    if contigs and os.path.getsize(contigs):
         LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
         if args.racon_iterations:
             # now run racon with each long-read file
