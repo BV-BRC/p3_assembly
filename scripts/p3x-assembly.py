@@ -920,6 +920,7 @@ def writeSpadesYamlFile(details):
     if 'iontorrent' in details['platform']:
         shortReadItems.extend(details['platform']['iontorrent'])
     for item in shortReadItems:
+        LOG.write("process item {}\n".format(item))
         if ":" in item:
             f = details['reads'][item]['file'][0]
             paired_end_reads[0].append(f)
