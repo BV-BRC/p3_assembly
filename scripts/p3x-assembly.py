@@ -44,7 +44,7 @@ WORK_DIR = None
 SAVE_DIR = None
 DETAILS_DIR = None
 
-def registerReads(reads, details, platform=None, interleaved=False, supercedes=None):
+def registerReads(reads, details, platform=None, interleaved=False, supercedes=None, max_bases=None):
     """
     create an entry in details for these reads
     move read files to working directory to allow relative paths
@@ -57,18 +57,20 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         return None
     details['original_items'].append(reads)
     
-    readStruct = {}
-    readStruct["file"] = []
-    #readStruct["path"] = []
-    readStruct["problem"] = []
-    readStruct["layout"] = 'na'
-    readStruct["platform"] = 'na'
-    readStruct['length_class'] = 'na'
+    read_struct = {}
+    read_struct['files'] = []
+    #read_struct["path"] = []
+    read_struct["problem"] = []
+    read_struct["layout"] = 'na'
+    read_struct["platform"] = 'na'
+    read_struct['length_class'] = 'na'
+    read_struct['delim'] = ''
+    file1, file2 = None, None
     if ":" in reads or "%" in reads:
         if ":" in reads:
             delim = ["%", ":"][":" in reads] # ":" if it is, else "%"
         read1, read2 = reads.split(delim)
-        readStruct["delim"] = delim
+        read_struct["delim"] = delim
         if not os.path.exists(read1):
             comment = "file does not exist: %s"%read1
             LOG.write(comment+"\n")
@@ -87,30 +89,8 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         if os.path.abspath(dir2) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WORK_DIR,file2)))
             os.symlink(os.path.abspath(read2), os.path.join(WORK_DIR,file2))
-        if file1.endswith(".bz2"):
-            uncompressed_file1 = file1[:-4]
-            with open(os.path.join(WORK_DIR, uncompressed_file1), 'w') as OUT:
-                with open(os.path.join(WORK_DIR, file1)) as IN:
-                    OUT.write(bz2.decompress(IN.read()))
-                    comment = "decompressing bz2 file %s to %s"%(file1, uncompressed_file1)
-                    LOG.write(comment+"\n")
-                    details["pre-assembly transformation"].append(comment)
-                    file1 = uncompressed_file1
-        if file2.endswith(".bz2"):
-            uncompressed_file2 = file2[:-4]
-            with open(os.path.join(WORK_DIR, uncompressed_file2), 'w') as OUT:
-                with open(os.path.join(WORK_DIR, file2)) as IN:
-                    OUT.write(bz2.decompress(IN.read()))
-                    comment = "decompressing bz2 file %s to %s"%(file2, uncompressed_file2)
-                    LOG.write(comment+"\n")
-                    details["pre-assembly transformation"].append(comment)
-                    file2 = uncompressed_file2
-        readStruct["file"].append(file1)
-        readStruct["file"].append(file2)
-        #readStruct["path"].append(read1)
-        #readStruct["path"].append(read2)
-        # the "files" entry is an array1 of tuples, each tuple is a path, basename yielded by os.path.split
-        registeredName = delim.join(sorted((file1, file2)))
+        read_struct['files'].append(file1)
+        read_struct['files'].append(file2)
     else:
         # no ':' or '%' delimiter, so a single file
         if not os.path.exists(reads):
@@ -119,22 +99,65 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             details["problem"].append(comment)
             return None
         if interleaved:
-            readStruct["interleaved"] = True
+            read_struct["interleaved"] = True
         dir1, file1 = os.path.split(reads)
         if os.path.abspath(dir1) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(reads, os.path.join(WORK_DIR,file1)))
             os.symlink(os.path.abspath(reads), os.path.join(WORK_DIR,file1))
-        readStruct["file"].append(file1)
-        #readStruct["path"].append(reads)
-        registeredName = file1
+        read_struct['files'].append(file1)
+        #read_struct["path"].append(reads)
+    study_reads(read_struct, max_bases)
+    if max_bases and read_struct["num_bases"] > max_bases: 
+        comment = "need to truncate file(s) {} to max_bases({})".format(read_struct['delim'].join(read_struct['files']), max_bases)
+        LOG.write(comment+"\n")
+        sys.stderr.write(comment+"\n")
+        subsample_reads(read_struct, max_bases=max_bases)
+        limit = ""
+        if max_bases:
+            limit = "{} bases".format(max_bases)
+        if file2:
+            comment = "limiting {} and {} to {}, new files are: {} and {}".format(file1, file1, limit, read_struct['files'][0], read_struct['files'][1])
+        else:
+            comment = "limiting {} to {}, new file is: {}".format(file1, limit, read_struct['files'][0])
+
+        LOG.write(comment+"\n")
+        details["pre-assembly transformation"].append(comment)
+        file1 = read_struct['files'][0]
+        if file2:
+            file2 = read_struct['files'][1]
+            
+    if file1.endswith(".bz2"):
+        uncompressed_file1 = file1[:-4]
+        with open(os.path.join(WORK_DIR, uncompressed_file1), 'w') as OUT:
+            with open(os.path.join(WORK_DIR, file1)) as IN:
+                OUT.write(bz2.decompress(IN.read()))
+                comment = "decompressing bz2 file %s to %s"%(file1, uncompressed_file1)
+                LOG.write(comment+"\n")
+                details["pre-assembly transformation"].append(comment)
+                read_struct['files'][0] = uncompressed_file1
+    if file2 and file2.endswith(".bz2"):
+        uncompressed_file2 = file2[:-4]
+        with open(os.path.join(WORK_DIR, uncompressed_file2), 'w') as OUT:
+            with open(os.path.join(WORK_DIR, file2)) as IN:
+                OUT.write(bz2.decompress(IN.read()))
+                comment = "decompressing bz2 file %s to %s"%(file2, uncompressed_file2)
+                LOG.write(comment+"\n")
+                details["pre-assembly transformation"].append(comment)
+                read_struct['files'][1] = uncompressed_file2
+
+    registeredName = read_struct['delim'].join(read_struct['files'])
+    if registeredName in details['reads']:
+        comment = "registered name %s already in details[reads]"%registeredName
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
 
     if supercedes:
         details['derived_reads'].append(registeredName)
-        readStruct['supercedes'] = supercedes
+        read_struct['supercedes'] = supercedes
         if supercedes in details['reads']:
             details['reads'][supercedes]['superceded_by'] = registeredName
             platform = details['reads'][supercedes]['platform']
-            readStruct['platform'] = platform
+            read_struct['platform'] = platform
             try: # swap item in platform[] with this new version
                 index = details['platform'][platform].index(supercedes)
                 details['platform'][platform][index] = registeredName
@@ -142,20 +165,12 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
                 comment = "Problem: superceded name %s not found in details_%s"%(registeredName, platform)
     else:
         if platform:
-            readStruct['platform'] = platform
+            read_struct['platform'] = platform
             if platform not in details['platform']:
                 details["platform"][platform] = []
             details["platform"][platform].append(registeredName)
-    if registeredName in details['reads']:
-        comment = "registered name %s already in details[reads]"%registeredName
-        LOG.write(comment+"\n")
-        details["problem"].append(comment)
 
-    details['reads'][registeredName]=readStruct
-    if len(readStruct['file']) == 2:
-        studyPairedReads(registeredName, details)
-    else:
-        studySingleReads(registeredName, details)
+    details['reads'][registeredName]=read_struct
     return registeredName
 
 def parseJsonParameters(args):
@@ -176,35 +191,46 @@ def parseJsonParameters(args):
                     pass
     return
 
-def studyPairedReads(item, details):
+def study_reads(read_data, max_bases=0):
     """
     Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
     """
     func_start = time()
-    LOG.write("studyPairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
-    details['reads'][item]['layout'] = 'paired-end'
-    details['reads'][item]['avg_len'] = 0
-    details['reads'][item]['length_class'] = 'na'
-    details['reads'][item]['num_reads'] = 0
-    file1, file2 = item.split(":")
+    LOG.write("start study_reads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
+    read_data['layout'] = 'paired-end'
+    read_data['avg_len'] = 0
+    read_data['length_class'] = 'na'
+    read_data['num_reads'] = 0
+    read_data['num_bases'] = 0
+    LOG.write("file(s): "+read_data['delim'].join(read_data['files'])+"\n")
+    if max_bases:
+        LOG.write("max base limit = {}\n".format(max_bases))
+
+    file1 = read_data['files'][0]
+    file2 = None
+    if len(read_data['files']) > 1:
+        file2 = read_data['files'][1]
     if file1.endswith("gz"):
         F1 = gzip.open(os.path.join(WORK_DIR, file1))
-        F2 = gzip.open(os.path.join(WORK_DIR, file2))
+        if file2:
+            F2 = gzip.open(os.path.join(WORK_DIR, file2))
     elif file1.endswith("bz2"):
         F1 = bz2.BZ2File(os.path.join(WORK_DIR, file1))
-        F2 = bz2.BZ2File(os.path.join(WORK_DIR, file2))
+        if file2:
+            F2 = bz2.BZ2File(os.path.join(WORK_DIR, file2))
     else:
         F1 = open(os.path.join(WORK_DIR, file1))
-        F2 = open(os.path.join(WORK_DIR, file2))
+        if file2:
+            F2 = open(os.path.join(WORK_DIR, file2))
 
     line = F1.readline()
     sample_read_id = line.split(' ')[0]
     F1.seek(0)
     if sample_read_id.startswith('>'):
         F1.close()
-        F2.close()
-        studyFastaReads(file1, details)
-        studyFastaReads(file2, details)
+        if file2:
+            F2.close()
+        studyFastaReads(read_data)
         return
     
     read_ids_paired = True
@@ -217,65 +243,102 @@ def studyPairedReads(item, details):
     maxQualScore = chr(0)
     minQualScore = chr(255)
     readNumber = 0
-    i = 0
-    for line1 in F1:
-        line2 = F2.readline()
-        if not line2:
-            line2 = ""
-        if i % 4 == 0 and read_ids_paired:
-            read_id_1 = line1.split(' ')[0] # get part up to first space, if any 
-            read_id_2 = line2.split(' ')[0] # get part up to first space, if any 
-            if not readNumber:
-                sample_read_id = read_id_1
-            if not read_id_1 == read_id_2:
-                diff = findSingleDifference(read_id_1, read_id_2)
-                if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
-                    read_ids_paired = False
-                    details['reads'][item]["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
-        elif i % 4 == 1:
-            seqLen1 = len(line1)-1
-            seqLen2 = len(line2)-1
-        elif i % 4 == 3:
-            if seqQualLenMatch:
-                if not (seqLen1 == len(line1)-1 and seqLen2 == len(line2)-1):
-                    readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
-                    seqQualLenMatch = False
-                    comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
-                    details['reads'][item]["problem"].append(comment)
-                    LOG.write(comment+"\n")
+    for i, line1 in enumerate(F1):
+        if file2:
+            line2 = F2.readline()
+            if not line2:
+                comment = "Number of reads differs between {} and {} after {}".format(file1, file2, readNumber)
+                LOG.write(comment+"\n")
+                read_data["problem"].append(comment)
+                break
+            if i % 4 == 0 and read_ids_paired:
+                read_id_1 = line1.split(' ')[0] # get part up to first space, if any 
+                read_id_2 = line2.split(' ')[0] # get part up to first space, if any 
+                if not read_id_1 == read_id_2:
+                    diff = findSingleDifference(read_id_1, read_id_2)
+                    if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
+                        read_ids_paired = False
+                        read_data["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
+            if i % 4 == 1:
+                seqLen1 = len(line1)-1
+                seqLen2 = len(line2)-1
+            elif i % 4 == 3:
+                if seqQualLenMatch:
+                    if not (seqLen1 == len(line1)-1 and seqLen2 == len(line2)-1):
+                        readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
+                        seqQualLenMatch = False
+                        comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
+                        read_data["problem"].append(comment)
+                        LOG.write(comment+"\n")
             totalReadLength += seqLen1 + seqLen2
             maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
             minReadLength = min(minReadLength, seqLen1, seqLen2)
             minQualScore = min(minQualScore + line1.rstrip() + line2.rstrip())
             maxQualScore = max(maxQualScore + line1.rstrip() + line2.rstrip())
             readNumber += 1
-        i += 1
+            if readNumber % 100000 == 0:
+                LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
+                LOG.flush()
+            if (max_bases and (totalReadLength > max_bases)):
+                comment = "read files {},{} exceed maximum base limit {}".format(file1, file2, max_bases)
+                read_data['problem'].append(comment)
+                LOG.write(comment+"\n")
+                break
+        else: # no line2 -- single-end reads
+            if i % 4 == 1:
+                seqLen1 = len(line1)-1
+            elif i % 4 == 3:
+                if seqQualLenMatch:
+                    if not (seqLen1 == len(line1)-1):
+                        readId = read_id_1
+                        seqQualLenMatch = False
+                        comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
+                        read_data["problem"].append(comment)
+                        LOG.write(comment+"\n")
+            totalReadLength += seqLen1
+            maxReadLength = max(maxReadLength, seqLen1) 
+            minReadLength = min(minReadLength, seqLen1)
+            minQualScore = min(minQualScore + line1.rstrip())
+            maxQualScore = max(maxQualScore + line1.rstrip())
+            readNumber += 1
+            #if readNumber % 100000 == 0:
+            #    LOG.write("number of reads studied so far: {}\n".format(readNumber))
+            #    LOG.flush()
+            if max_bases and (totalReadLength > max_bases):
+                comment = "read file {} exceeds maximum base limit {}".format(file1, max_bases)
+                read_data['problem'].append(comment)
+                LOG.write(comment+"\n")
+                break
 
     F1.close()
-    F2.close()
+    if file2:
+        F2.close()
 
-    avgReadLength = totalReadLength/(readNumber*2)
-    details['reads'][item]['avg_len'] = avgReadLength
-    details['reads'][item]['max_read_len'] = maxReadLength
-    details['reads'][item]['min_read_len'] = minReadLength
-    details['reads'][item]['num_reads'] = readNumber
-    details['reads'][item]['sample_read_id'] = sample_read_id 
+    avgReadLength = totalReadLength/readNumber
+    if file2:
+        avgReadLength/=2
+    read_data['avg_len'] = avgReadLength
+    read_data['max_read_len'] = maxReadLength
+    read_data['min_read_len'] = minReadLength
+    read_data['num_reads'] = readNumber
+    read_data['num_bases'] = totalReadLength
+    read_data['sample_read_id'] = sample_read_id 
 
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
-    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
-    if maxReadLength >= MAX_SHORT_READ_LENGTH:
-        comment = "paired reads appear to be long, expected short: %s"%item
+    read_data['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    read_data['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
+    if file2 and maxReadLength >= MAX_SHORT_READ_LENGTH:
+        comment = "paired reads appear to be long, expected short: %s"%read_data['delim'].join(read_data['files'])
         LOG.write(comment+"\n")
-        details['reads'][item]['problem'].append(comment)
-
-    LOG.write("duration of studyPairedReads was %d seconds\n"%(time() - func_start))
+        read_data['problem'].append(comment)
+    LOG.write("analysis of {} shows read_number = {} and total_bases = {}\n".format(":".join(read_data['files']), readNumber, totalReadLength))
+    LOG.write("duration of study_reads was %d seconds\n"%(time() - func_start))
     return
-
-def studySingleReads(item, details):
+"""
+def studySingleReads(item, read_data):
     func_start = time()
-    LOG.write("studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
-    details['reads'][item]['layout'] = 'single-end'
-    details['reads'][item]['num_reads'] = 0
+    LOG.write("start studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
+    read_data['layout'] = 'single-end'
+    read_data['num_reads'] = 0
     if item.endswith("gz"):
         F = gzip.open(os.path.join(WORK_DIR, item))
     elif item.endswith("bz2"):
@@ -288,7 +351,7 @@ def studySingleReads(item, details):
     F.seek(0)
     if sample_read_id.startswith(">"):
         F.close()
-        studyFastaReads(item, details)
+        studyFastaReads(read_data)
         return
 
     totalReadLength = 0
@@ -300,7 +363,7 @@ def studySingleReads(item, details):
     readNumber = 0
     i = 0
     interleaved = True
-    prev_read_id = None
+    prev_read_id = ''
     for line in F:
         if i % 4 == 0:
             read_id = line.split(' ')[0] # get part up to first space, if any 
@@ -319,7 +382,7 @@ def studySingleReads(item, details):
             if seqQualLenMatch and (seqLen != qualLen):
                 seqQualLenMatch = False
                 comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                details['reads'][item]["problem"].append(comment)
+                read_data["problem"].append(comment)
                 LOG.write(comment+"\n")
             totalReadLength += seqLen
             maxReadLength = max(maxReadLength, seqLen) 
@@ -334,20 +397,21 @@ def studySingleReads(item, details):
         LOG.write(comment+"\n")
         return
     avgReadLength = totalReadLength/readNumber
-    details['reads'][item]['avg_len'] = avgReadLength
-    details['reads'][item]['max_read_len'] = maxReadLength
-    details['reads'][item]['min_read_len'] = minReadLength
-    details['reads'][item]['num_reads'] = readNumber
-    details['reads'][item]['sample_read_id'] = sample_read_id 
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
-    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
+    read_data['avg_len'] = avgReadLength
+    read_data['max_read_len'] = maxReadLength
+    read_data['min_read_len'] = minReadLength
+    read_data['num_reads'] = readNumber
+    read_data['num_bases'] = totalReadLength
+    read_data['sample_read_id'] = sample_read_id 
+    read_data['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    read_data['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
     if interleaved:
-        details['reads'][item]['interleaved'] = True
+        read_data['interleaved'] = True
 
     LOG.write("duration of studySingleReads was %d seconds\n"%(time() - func_start))
     return
-
-def studyFastaReads(item, details):
+"""
+def studyFastaReads(read_data):
     """
     assume format is fasta
     count reads, calc total length, mean, max, min
@@ -359,7 +423,7 @@ def studyFastaReads(item, details):
     maxReadLength = 0
     minReadLength = 1e6
     readNumber = 0
-    F = open(item)
+    F = open(read_data['files'][0])
     for line in F:
         if line.startswith(">"):
             readNumber += 1
@@ -380,20 +444,95 @@ def studyFastaReads(item, details):
         minReadLength = min(minReadLength, seqLen)
 
     avgReadLength = totalReadLength/readNumber
-    details['reads'][item]['avg_len'] = avgReadLength
-    details['reads'][item]['max_read_len'] = maxReadLength
-    details['reads'][item]['min_read_len'] = minReadLength
-    details['reads'][item]['num_reads'] = readNumber
-    details['reads'][item]['sample_read_id'] = sample_read_id 
-    details['reads'][item]['platform'] = 'fasta'
-    details['reads'][item]['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
-    details['reads'][item]['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
-    if item not in details['platform']['fasta']:
-        details['platform']['fasta'].append(item)
+    read_data['avg_len'] = avgReadLength
+    read_data['max_read_len'] = maxReadLength
+    read_data['min_read_len'] = minReadLength
+    read_data['num_reads'] = readNumber
+    read_data['sample_read_id'] = sample_read_id 
+    read_data['platform'] = 'fasta'
+    read_data['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
+    read_data['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
 
     LOG.write("duration of studyFastaReads was %d seconds\n"%(time() - func_start))
     return
 
+def subsample_reads(read_data, max_bases=0):
+    """
+    Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
+    """
+    func_start = time()
+    LOG.write("subsamplePairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
+
+    truncated_read_data = read_data.copy()
+    truncated_read_data['avg_len'] = 0
+    truncated_read_data['length_class'] = 'na'
+    truncated_read_data['num_reads'] = 0
+    truncated_read_data['num_bases'] = 0
+
+    file1 = read_data['files'][0]
+    file2 = None
+    if len(read_data['files']) > 1:
+        file2 = read_data['files'][1]
+    suffix = "_subsampled.fastq"
+
+    out_file1, out_file2 = file1, file2
+    if file1.endswith("gz"):
+        F1 = gzip.open(os.path.join(WORK_DIR, file1))
+        out_file1 = file1[:-3]+suffix
+        if file2:
+            F2 = gzip.open(os.path.join(WORK_DIR, file2))
+            out_file2 = file2[:-3]+suffix
+    elif file1.endswith("bz2"):
+        F1 = bz2.BZ2File(os.path.join(WORK_DIR, file1))
+        out_file1 = file1[:-4]+suffix
+        if file2:
+            F2 = bz2.BZ2File(os.path.join(WORK_DIR, file2))
+            out_file2 = file2[:-4]+suffix
+    else:
+        F1 = open(os.path.join(WORK_DIR, file1))
+        out_file1 = file1+suffix
+        if file2:
+            F2 = open(os.path.join(WORK_DIR, file2))
+            out_file2 = file2+suffix
+
+    truncated_read_data['files']=[out_file1]
+    if file2:
+            truncated_read_data['files'].append(out_file2)
+
+    truncated_read_data['files'] = (out_file1, out_file2)[:len(read_data['files'])]
+    OF1 = open(os.path.join(WORK_DIR, out_file1), 'w')
+    if file2:
+        OF2 = open(os.path.join(WORK_DIR, out_file2), 'w')
+
+    reads_written = 0
+    bases_written = 0
+    for i, line1 in enumerate(F1):
+        OF1.write(line1)
+        if file2:
+            line2 = F2.readline()
+            OF2.write(line2)
+        if i % 4 == 1:
+            bases_written += len(line1) - 1
+            if file2:
+                bases_written += len(line2) - 1
+        elif i % 4 == 3:
+            reads_written += 1
+            if max_bases and bases_written >= max_bases:
+                break
+
+    OF1.close()
+    if file2:
+        OF2.close()
+
+    truncated_read_data['num_reads'] = reads_written
+    truncated_read_data['num_bases'] = bases_written
+    avgReadLength = bases_written/reads_written
+    if file2:
+        avgReadLength /= 2 # paired reads
+    truncated_read_data['avg_len'] = avgReadLength
+
+    LOG.write("duration of subsample_reads was %d seconds\n"%(time() - func_start))
+    return truncated_read_data
 
 def inferPlatform(read_id, maxReadLength):
     """ 
@@ -505,7 +644,7 @@ def trimGalore(details, threads=1):
                 details["trim report"]['trim program'] = "trim_galore "+m.group(1)
                 details["version"]['trim_galore'] = m.group(1)
     for trimReads in toRegister:
-        registerReads(trimReads, details, supercedes=toRegister[trimReads])
+        registerReads(trimReads, details, supercedes=toRegister[trimReads], max_bases=details['max_bases'])
 
     LOG.write("trim_galore trimming completed, duration = %d seconds\n\n\n"%(time()-startTrimTime))
 
@@ -708,7 +847,7 @@ def categorize_anonymous_read_files(args, details):
             comment = "Cannot decide read type for item "+item
             LOG.write(comment+"\n")
             details['problem'].append(comment)
-        registerReads(item, details, platform=read_file_type[item], interleaved = (args.interleaved and item in args.interleaved))
+        registerReads(item, details, platform=read_file_type[item], interleaved = (args.interleaved and item in args.interleaved), max_bases=args.max_bases)
 
     return
 
@@ -894,9 +1033,9 @@ def processSraFastqFiles(fastqFiles, details, run_info=None):
     elif run_info["Platform"] == "OXFORD_NANOPORE":
         platform = "nanopore"
     if not platform:
-        ids, avg_length = sampleReads(fastqFiles[0], details)
-        platform = ["illumina", "pacbio"][avg_length > MAX_SHORT_READ_LENGTH]
-    registerReads(item, details, platform=platform)
+        ids, max_length = sampleReads(fastqFiles[0], details)
+        platform = ["illumina", "pacbio"][max_length > MAX_SHORT_READ_LENGTH]
+    registerReads(item, details, platform=platform, max_bases=details['max_bases'])
     return
 
 def writeSpadesYamlFile(details):
@@ -921,17 +1060,17 @@ def writeSpadesYamlFile(details):
     for item in shortReadItems:
         LOG.write("process item {}\n".format(item))
         if ":" in item:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             paired_end_reads[0].append(f)
-            f = details['reads'][item]['file'][1]
+            f = details['reads'][item]['files'][1]
             paired_end_reads[1].append(f)
         elif "%" in item:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             mate_pair_reads[0].append(f)
-            f = details['reads'][item]['file'][1]
+            f = details['reads'][item]['files'][1]
             mate_pair_reads[1].append(f)
         else:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             if 'interleaved' in details['reads'][item]:
                 interleaved_reads.append(f)
             else:
@@ -975,7 +1114,7 @@ def writeSpadesYamlFile(details):
     if details['platform']['pacbio']:
         pacbio_reads = []
         for item in details['platform']['pacbio']:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             pacbio_reads.append(f)
         if precedingElement:
             OUT.write(",\n")
@@ -986,7 +1125,7 @@ def writeSpadesYamlFile(details):
     if details['platform']['nanopore']:
         nanopore_reads = []
         for item in details['platform']['nanopore']:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             nanopore_reads.append(f)
         if precedingElement:
             OUT.write(",\n")
@@ -997,7 +1136,7 @@ def writeSpadesYamlFile(details):
     if details['platform']['fasta']:
         fasta_reads = []
         for item in details['platform']['fasta']:
-            f = details['reads'][item]['file'][0]
+            f = details['reads'][item]['files'][0]
             fasta_reads.append(f)
         if precedingElement:
             OUT.write(",\n")
@@ -1217,7 +1356,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     for item in details['reads']:
         if 'superceded_by' in details['reads'][item]:
             continue
-        files = details['reads'][item]['file'] 
+        files = details['reads'][item]['files'] 
         if details['reads'][item]['length_class'] == 'short':
             if len(files) > 1:
                 short1 = files[0]
@@ -1237,6 +1376,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 
     LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
+    LOG.flush()
     unicyclerStartTime = time()
     details["assembly"]['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
@@ -1269,6 +1409,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
 
     LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
 
+    unicyclerLogFile = "unicycler.log"
     if os.path.exists("unicycler.log"):
         unicyclerLogFile = prefix+"unicycler.log"
         shutil.move("unicycler.log", os.path.join(DETAILS_DIR, unicyclerLogFile))
@@ -1343,6 +1484,7 @@ def runSpades(details, args):
         command.append("--plasmid")
     LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
     LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
+    LOG.flush()
     spadesStartTime = time()
 
     details['assembly']['command_line'] = " ".join(command)
@@ -1744,6 +1886,7 @@ usage: canu [-version] [-citation] \
         details["problem"].append("no long read files available for canu")
         return None
     LOG.write("canu command =\n"+" ".join(command)+"\n")
+    LOG.flush()
 
     canuStartTime = time()
     #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
@@ -1919,6 +2062,7 @@ def write_html_report(htmlFile, details):
 
 
 def main():
+    main_return_code = 1 # set to zero when we have an assembly
     global START_TIME
     START_TIME = time()
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -1930,6 +2074,7 @@ def main():
     parser.add_argument('--nanopore', metavar='files', nargs='*', help='list of Oxford Nanotech fastq[.gz] files', required=False, default=[])
     parser.add_argument('--sra', metavar='files', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
+    parser.add_argument('--max_bases', type=int, help='process at most this many bases per read file or pair')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
@@ -2002,6 +2147,7 @@ def main():
     details["problem"] = []
     details["derived_reads"] = []
     details["platform"] = {'illumina':[], 'iontorrent':[], 'pacbio':[], 'nanopore':[], 'fasta':[], 'anonymous':[]}
+    details['max_bases']=args.max_bases
 
     if args.anonymous_reads:
         categorize_anonymous_read_files(args, details)
@@ -2013,21 +2159,21 @@ def main():
         platform = 'illumina'
         for item in args.illumina:
             interleaved = args.interleaved and item in args.interleaved
-            registerReads(item, details, platform=platform, interleaved=interleaved)
+            registerReads(item, details, platform=platform, interleaved=interleaved, max_bases=args.max_bases)
 
     if args.iontorrent:
         platform = 'iontorrent'
         for item in args.iontorrent:
             interleaved = args.interleaved and item in args.interleaved
-            registerReads(item, details, platform=platform, interleaved=interleaved)
+            registerReads(item, details, platform=platform, interleaved=interleaved, max_bases=args.max_bases)
 
     if args.pacbio:
         for item in args.pacbio:
-            registerReads(item, details, platform = 'pacbio')
+            registerReads(item, details, platform = 'pacbio', max_bases=args.max_bases)
 
     if args.nanopore:
         for item in args.nanopore:
-            registerReads(item, details, platform = 'nanopore')
+            registerReads(item, details, platform = 'nanopore', max_bases=args.max_bases)
 
     contigs = ""
     if args.contigs:
@@ -2079,6 +2225,8 @@ def main():
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
     if contigs and os.path.getsize(contigs):
+        if not args.contigs:
+            main_return_code = 0
         LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
         if args.racon_iterations:
             # now run racon with each long-read file
@@ -2133,7 +2281,7 @@ def main():
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - START_TIME)/3600))
     LOG.close()
-
+    return main_return_code
 
 if __name__ == "__main__":
     main()
