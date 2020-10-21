@@ -106,12 +106,12 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             os.symlink(os.path.abspath(reads), os.path.join(WORK_DIR,file1))
         read_struct['files'].append(file1)
         #read_struct["path"].append(reads)
-    study_reads(read_struct, max_bases)
+    read_struct = study_reads(read_struct, max_bases)
     if max_bases and read_struct["num_bases"] > max_bases: 
         comment = "need to truncate file(s) {} to max_bases({})".format(read_struct['delim'].join(read_struct['files']), max_bases)
         LOG.write(comment+"\n")
         sys.stderr.write(comment+"\n")
-        subsample_reads(read_struct, max_bases=max_bases)
+        read_struct = subsample_reads(read_struct, max_bases=max_bases)
         limit = ""
         if max_bases:
             limit = "{} bases".format(max_bases)
@@ -119,6 +119,8 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             comment = "limiting {} and {} to {}, new files are: {} and {}".format(file1, file1, limit, read_struct['files'][0], read_struct['files'][1])
         else:
             comment = "limiting {} to {}, new file is: {}".format(file1, limit, read_struct['files'][0])
+        for key in read_struct:
+            comment += "\n\t{} is {}\n".format(key, read_struct[key])
 
         LOG.write(comment+"\n")
         details["pre-assembly transformation"].append(comment)
@@ -331,86 +333,14 @@ def study_reads(read_data, max_bases=0):
         LOG.write(comment+"\n")
         read_data['problem'].append(comment)
     LOG.write("analysis of {} shows read_number = {} and total_bases = {}\n".format(":".join(read_data['files']), readNumber, totalReadLength))
+    if False: #debugging
+        comment = ""
+        for key in read_data:
+            comment += "study_reads: {} is {}\n".format(key, read_data[key])
+    LOG.write(comment)
     LOG.write("duration of study_reads was %d seconds\n"%(time() - func_start))
-    return
-"""
-def studySingleReads(item, read_data):
-    func_start = time()
-    LOG.write("start studySingleReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start-START_TIME))
-    read_data['layout'] = 'single-end'
-    read_data['num_reads'] = 0
-    if item.endswith("gz"):
-        F = gzip.open(os.path.join(WORK_DIR, item))
-    elif item.endswith("bz2"):
-        F = bz2.BZ2File(os.path.join(WORK_DIR, item))
-    else:
-        F = open(os.path.join(WORK_DIR, item))
+    return read_data
 
-    line = F.readline()
-    sample_read_id = line.split(' ')[0] # get part up to first space, if any 
-    F.seek(0)
-    if sample_read_id.startswith(">"):
-        F.close()
-        studyFastaReads(read_data)
-        return
-
-    totalReadLength = 0
-    seqQualLenMatch = True
-    maxReadLength = 0
-    minReadLength = 1e6
-    maxQualScore = chr(0)
-    minQualScore = chr(255)
-    readNumber = 0
-    i = 0
-    interleaved = True
-    prev_read_id = ''
-    for line in F:
-        if i % 4 == 0:
-            read_id = line.split(' ')[0] # get part up to first space, if any 
-            if not sample_read_id:
-                sample_read_id = read_id
-            if interleaved and i % 8 == 0 and prev_read_id: # at every other sample ID check for matching prev, indicates interleaved
-                if prev_read_id != sample_read_id:
-                    diff = findSingleDifference(prev_read_id, sample_read_id)
-                    if diff == None or sorted(prev_read_id[diff[0]:diff[1]], sample_read_id[diff[0]:diff[1]]) != ('1', '2'):
-                        interleaved=False
-
-        elif i % 4 == 1:
-            seqLen = len(line)-1
-        elif i % 4 == 3:
-            qualLen = len(line)-1
-            if seqQualLenMatch and (seqLen != qualLen):
-                seqQualLenMatch = False
-                comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                read_data["problem"].append(comment)
-                LOG.write(comment+"\n")
-            totalReadLength += seqLen
-            maxReadLength = max(maxReadLength, seqLen) 
-            minReadLength = min(minReadLength, seqLen)
-            minQualScore = min(minQualScore + line.rstrip())
-            maxQualScore = max(maxQualScore + line.rstrip())
-            readNumber += 1
-        i += 1
-                
-    if not readNumber:
-        comment = "no reads found in %s\n"%item
-        LOG.write(comment+"\n")
-        return
-    avgReadLength = totalReadLength/readNumber
-    read_data['avg_len'] = avgReadLength
-    read_data['max_read_len'] = maxReadLength
-    read_data['min_read_len'] = minReadLength
-    read_data['num_reads'] = readNumber
-    read_data['num_bases'] = totalReadLength
-    read_data['sample_read_id'] = sample_read_id 
-    read_data['inferred_platform'] = inferPlatform(sample_read_id, maxReadLength)
-    read_data['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
-    if interleaved:
-        read_data['interleaved'] = True
-
-    LOG.write("duration of studySingleReads was %d seconds\n"%(time() - func_start))
-    return
-"""
 def studyFastaReads(read_data):
     """
     assume format is fasta
@@ -464,10 +394,6 @@ def subsample_reads(read_data, max_bases=0):
     LOG.write("subsamplePairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
 
     truncated_read_data = read_data.copy()
-    truncated_read_data['avg_len'] = 0
-    truncated_read_data['length_class'] = 'na'
-    truncated_read_data['num_reads'] = 0
-    truncated_read_data['num_bases'] = 0
 
     file1 = read_data['files'][0]
     file2 = None
@@ -1605,8 +1531,8 @@ def convertSamToBam(samFile, details, threads=1):
                 details["version"]['samtools'] = line.strip()
 
     sortThreads = max(int(threads/2), 1)
-    bamFileUnsorted = re.sub(".sam", "_unsorted.bam", samFile, re.IGNORECASE)
-    command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", bamFileUnsorted, samFile]
+    samFilePrefix = re.sub(".sam", "", samFile, re.IGNORECASE)
+    command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", samFilePrefix+"_unsorted.bam", samFile]
     LOG.write("executing:\n"+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
     LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
@@ -1618,16 +1544,13 @@ def convertSamToBam(samFile, details, threads=1):
 
     LOG.flush()
     #os.remove(samFile) #save a little space
-    bamFileSorted = re.sub(".sam", ".bam", samFile, re.IGNORECASE)
-    LOG.write("bamFileSorted = "+bamFileSorted+"\n")
 
     #command = ["samtools", "sort", "-o", bamFileSorted, bamFileUnsorted]
     #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
 
-    command = ["samtools", "sort", "-@", str(sortThreads), bamFileUnsorted]
+    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
     LOG.write("executing:\n"+' '.join(command)+"\n")
-    BAM = open(bamFileSorted, 'wb')
-    p = subprocess.Popen(command, shell=False, stdout=BAM)
+    p = subprocess.Popen(command, shell=False)
     return_code = p.wait()
 
     if return_code != 0:
@@ -1635,6 +1558,8 @@ def convertSamToBam(samFile, details, threads=1):
         LOG.write(comment+"\n")
         details["problem"].append(comment)
         return None
+    bamFileSorted = samFilePrefix+".bam" 
+    LOG.write("bamFileSorted = "+bamFileSorted+"\n")
     if not os.path.exists(bamFileSorted):
         comment = "{0} not found, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
         LOG.write(comment+"\n")
