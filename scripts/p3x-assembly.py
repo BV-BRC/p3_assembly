@@ -119,8 +119,8 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             comment = "limiting {} and {} to {}, new files are: {} and {}".format(file1, file1, limit, read_struct['files'][0], read_struct['files'][1])
         else:
             comment = "limiting {} to {}, new file is: {}".format(file1, limit, read_struct['files'][0])
-        for key in read_struct:
-            comment += "\n\t{} is {}\n".format(key, read_struct[key])
+        #for key in read_struct:
+        #    comment += "\n\t{} is {}\n".format(key, read_struct[key])
 
         LOG.write(comment+"\n")
         details["pre-assembly transformation"].append(comment)
@@ -1548,17 +1548,19 @@ def convertSamToBam(samFile, details, threads=1):
     #command = ["samtools", "sort", "-o", bamFileSorted, bamFileUnsorted]
     #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
 
-    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
+    bamFileSorted = samFilePrefix+".bam" 
+    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam"]
     LOG.write("executing:\n"+' '.join(command)+"\n")
-    p = subprocess.Popen(command, shell=False)
-    return_code = p.wait()
+    with open(bamFileSorted, 'w') as OUT:
+        p = subprocess.Popen(command, shell=False, stdout=OUT)
+        return_code = p.wait()
+        OUT.close()
 
     if return_code != 0:
         comment = "samtools sort returned %d, convertSamToBam failed"%return_code
         LOG.write(comment+"\n")
         details["problem"].append(comment)
         return None
-    bamFileSorted = samFilePrefix+".bam" 
     LOG.write("bamFileSorted = "+bamFileSorted+"\n")
     if not os.path.exists(bamFileSorted):
         comment = "{0} not found, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
@@ -1690,7 +1692,7 @@ def calcReadDepth(bamfiles):
     """ Return dict of contig_ids to tuple of (coverage, normalized_coverage) """
     LOG.write("calcReadDepth(%s)\n"%" ".join(bamfiles))
     readDepth = {}
-    command = ["samtools", "depth", "-a"]
+    command = ["samtools", "depth"]
     if type(bamfiles) is str:
         command.append(bamfiles)
     else:
