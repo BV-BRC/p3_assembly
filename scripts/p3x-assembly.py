@@ -337,7 +337,7 @@ def study_reads(read_data, max_bases=0):
         comment = ""
         for key in read_data:
             comment += "study_reads: {} is {}\n".format(key, read_data[key])
-    LOG.write(comment)
+        LOG.write(comment)
     LOG.write("duration of study_reads was %d seconds\n"%(time() - func_start))
     return read_data
 
@@ -1549,7 +1549,7 @@ def convertSamToBam(samFile, details, threads=1):
     #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
 
     bamFileSorted = samFilePrefix+".bam" 
-    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam"]
+    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
     LOG.write("executing:\n"+' '.join(command)+"\n")
     with open(bamFileSorted, 'w') as OUT:
         p = subprocess.Popen(command, shell=False, stdout=OUT)
