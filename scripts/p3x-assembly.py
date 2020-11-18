@@ -2001,7 +2001,7 @@ def main():
     parser.add_argument('--nanopore', metavar='files', nargs='*', help='list of Oxford Nanotech fastq[.gz] files', required=False, default=[])
     parser.add_argument('--sra', metavar='files', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
-    parser.add_argument('--max_bases', type=int, help='process at most this many bases per read file or pair')
+    parser.add_argument('--max_bases', type=int, default=10000000000, help='process at most this many bases per read file or pair')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
@@ -2142,12 +2142,17 @@ def main():
         if not os.path.exists(contigs):
             LOG.write("Problem: cannot find input contigs as "+contigs+"\n")
             exit()
-    elif "spades" in args.recipe or args.recipe == "single-cell":
-        contigs = runSpades(details, args)
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix )
+        if not contigs:
+            comment = "unicycler failed to generate contigs, trying spades"
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+            contigs = runSpades(details, args)
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
+    elif "spades" in args.recipe or args.recipe == "single-cell":
+        contigs = runSpades(details, args)
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
