@@ -112,18 +112,13 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         LOG.write(comment+"\n")
         sys.stderr.write(comment+"\n")
         read_struct = subsample_reads(read_struct, max_bases=max_bases)
-        limit = ""
-        if max_bases:
-            limit = "{} bases".format(max_bases)
-        if file2:
-            comment = "limiting {} and {} to {}, new files are: {} and {}".format(file1, file1, limit, read_struct['files'][0], read_struct['files'][1])
-        else:
-            comment = "limiting {} to {}, new file is: {}".format(file1, limit, read_struct['files'][0])
-        #for key in read_struct:
-        #    comment += "\n\t{} is {}\n".format(key, read_struct[key])
-
+        limit = "{} bases".format(max_bases)
+        comment = "max_bases limit exceeded, trucating to approximately {} bases".format(max_bases)
+        if 'problem' not in read_struct:
+            read_struct['problem'] = []
+        read_struct['problem'].append(comment)
         LOG.write(comment+"\n")
-        details["pre-assembly transformation"].append(comment)
+        #details["pre-assembly transformation"].append(comment)
         file1 = read_struct['files'][0]
         if file2:
             file2 = read_struct['files'][1]
@@ -135,7 +130,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
                 OUT.write(bz2.decompress(IN.read()))
                 comment = "decompressing bz2 file %s to %s"%(file1, uncompressed_file1)
                 LOG.write(comment+"\n")
-                details["pre-assembly transformation"].append(comment)
+                #details["pre-assembly transformation"].append(comment)
                 read_struct['files'][0] = uncompressed_file1
     if file2 and file2.endswith(".bz2"):
         uncompressed_file2 = file2[:-4]
@@ -144,14 +139,14 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
                 OUT.write(bz2.decompress(IN.read()))
                 comment = "decompressing bz2 file %s to %s"%(file2, uncompressed_file2)
                 LOG.write(comment+"\n")
-                details["pre-assembly transformation"].append(comment)
+                #details["pre-assembly transformation"].append(comment)
                 read_struct['files'][1] = uncompressed_file2
 
     registeredName = read_struct['delim'].join(read_struct['files'])
     if registeredName in details['reads']:
         comment = "registered name %s already in details[reads]"%registeredName
         LOG.write(comment+"\n")
-        details["problem"].append(comment)
+        #details["problem"].append(comment)
 
     if supercedes:
         details['derived_reads'].append(registeredName)
@@ -502,73 +497,58 @@ def inferPlatform(read_id, maxReadLength):
 def trimGalore(details, threads=1):
     startTrimTime = time()
     LOG.write("\ntrimGalore() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
+    command = ["trim_galore", "--version"]
+    proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read().decode().strip()
+    proc.wait()
+    m = re.search(r"(version\s+\S+)", version_text)
+    if m:
+        trim_galore_version = "trim_galore " + m.group(1)
+        details["version"]['trim_galore'] = trim_galore_version
     if "trim report" not in details:
         details["trim report"] = {}
+        details["trim report"]['trim program'] = trim_galore_version
     toRegister = {} # save trimmed reads to register after iterating dictionary to avoid error "dictionary changed size during iteration"
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'short' and not details['reads'][reads]['platform'] == 'fasta':
-            command = ['trim_galore', '-j', str(threads), '-o', '.']
-            if ':' in reads:
-                splitReads = reads.split(":")
-                #-j 4 -o testTrim --length 30 --paired SRR1395326_1_10pct.fastq SRR1395326_2_10pct.fastq
-                command.extend(["--paired", splitReads[0], splitReads[1]])
-                LOG.write("command: "+" ".join(command)+"\n")
-                proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
-                trimGaloreStderr = proc.stderr.read()
-                return_code = proc.wait()
-                LOG.write("return code = %d\n"%return_code)
-                trimReads = re.findall(r"Writing validated paired-end read \d reads to (\S+)", trimGaloreStderr)
-                LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
-                if not trimReads or len(trimReads) < 2:
-                    comment = "trim_galore did not name trimmed reads output files in stderr"
-                    LOG.write(comment+"\n")
-                    details['reads'][reads]['problem'].append(comment)
-                    continue
-                comment = "trim_galore, input %s, output %s"%(reads, ":".join(trimReads))
-                LOG.write(comment+"\n")
-                details["pre-assembly transformation"].append(comment)
-                toRegister[":".join(trimReads)] = reads
-
-                trimReports = re.findall(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
-                LOG.write("re.findall for trim reports returned %s\n"%str(trimReports))
-                details["trim report"][reads]=[]
-                for f in trimReports:
-                    shutil.move(f, os.path.join(DETAILS_DIR, os.path.basename(f)))
-                    details["trim report"][reads].append(f)
+            command = ['trim_galore', '-j', str(min(threads, 8)), '-o', '.']
+            if len(details['reads'][reads]['files']) > 1:
+                command.extend(["--paired", details['reads'][reads]['files'][0], details['reads'][reads]['files'][1]])
             else:
                 command.append(reads)
-                LOG.write("command: "+" ".join(command))
-                proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
-                trimGaloreStderr = proc.stderr.read()
-                return_code = proc.wait()
-                LOG.write("return code = %d\n"%return_code)
-                trimReads = re.search(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
-                LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
-                if not trimReads:
-                    comment = "trim_galore did not name trimmed reads output files in stderr"
-                    LOG.write(comment+"\n")
-                    details['reads'][reads]['problem'].append(comment)
-                    continue
-                trimReads = trimReads.group(1)
-                comment = "trim_galore, input %s, output %s"%(reads, trimReads)
-                LOG.write(comment+"\n")
-                details["pre-assembly transformation"].append(comment)
-                toRegister[trimReads] = reads
 
-                trimReport = re.search(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
-                LOG.write("regex for trim report returned %s\n"%str(trimReport))
-                if trimReport:
-                    trimReport = trimReport.group(1)
-                    details["trim report"][reads]=trimReport
-                    shutil.move(trimReport, os.path.join(DETAILS_DIR, os.path.basename(trimReport)))
-            command = ["trim_galore", "--version"]
-            proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-            version_text = proc.stdout.read().decode().strip()
-            proc.wait()
-            m = re.search(r"(version\s+\S+)", version_text)
-            if m:
-                details["trim report"]['trim program'] = "trim_galore "+m.group(1)
-                details["version"]['trim_galore'] = m.group(1)
+            LOG.write("command: "+" ".join(command)+"\n")
+            proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+            trimGaloreStderr = proc.stderr.read()
+            return_code = proc.wait()
+            LOG.write("return code = %d\n"%return_code)
+            trimReads = re.findall(r"Writing validated paired-end read \d reads to (\S+)", trimGaloreStderr)
+            if not trimReads:
+                trimReads = re.findall(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
+            LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
+            if not trimReads:
+                comment = "trim_galore did not name trimmed reads output files in stderr"
+                LOG.write(comment+"\n")
+                details['reads'][reads]['problem'].append(comment)
+                continue
+            comment = "trim_galore, input %s, output %s"%(reads, ":".join(trimReads))
+            LOG.write(comment+"\n")
+            trimmed_reads = trimReads[0]
+            if len(trimReads) > 1:
+                trimmed_reads += ":"+trimReads[1]
+            details['reads'][reads]['trimmed_reads'] = trimmed_reads
+            details["pre-assembly transformation"].append(comment)
+            toRegister[trimmed_reads] = reads
+
+            trimReports = re.findall(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
+            LOG.write("re.findall for trim reports returned %s\n"%str(trimReports))
+            details["trim report"][reads]=[]
+            for f in trimReports:
+                filename_base = os.path.basename(f)
+                shutil.move(f, os.path.join(DETAILS_DIR, filename_base))
+                details["trim report"][reads].append(filename_base)
+
+            
     for trimReads in toRegister:
         registerReads(trimReads, details, supercedes=toRegister[trimReads], max_bases=details['max_bases'])
 
@@ -668,7 +648,7 @@ def categorize_anonymous_read_files(args, details):
             read_file_type[item] = inferPlatform(read_id_sample[item][0], max_read_length)
             comment = "interpreting %s type as %s"%(item, read_file_type[item])
             LOG.write(comment+"\n")
-            details["pre-assembly transformation"].append(comment)
+            #details["pre-assembly transformation"].append(comment)
             if read_file_type[item] is not None:
                 singleFiles.append(item)
 
@@ -717,20 +697,20 @@ def categorize_anonymous_read_files(args, details):
             read_file_type[filename1] = inferPlatform(read_id_sample[filename1][0], max_read_length)
             comment = "interpreting %s type as %s"%(filename1, read_file_type[filename1])
             LOG.write(comment+"\n")
-            details["pre-assembly transformation"].append(comment)
+            #details["pre-assembly transformation"].append(comment)
         if filename2 not in read_file_type:
             read_id_sample[filename2], max_read_length = sampleReads(filename2, details)
             read_file_type[filename2] = inferPlatform(read_id_sample[filename2][0], max_read_length)
             comment = "interpreting %s type as %s"%(filename2, read_file_type[filename2])
             LOG.write(comment+"\n")
-            details["pre-assembly transformation"].append(comment)
+            #details["pre-assembly transformation"].append(comment)
 
         read_types_match = True
         # test if read types are the same
         if read_file_type[filename1] != read_file_type[filename2]:
             comment = "Discordant fileTypes for %s(%s) vs %s(%s)"%(filename1, read_file_type[filename1], filename2, read_file_type[filename2])
             LOG.write(comment+"\n")
-            details["problem"].append(comment)
+            #details["problem"].append(comment)
             read_types_match = False
         read_file_type[item] = read_file_type[filename1] #easier to retrieve later
 
@@ -1119,7 +1099,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             if bam:
                 bamFiles.append(bam)
     if bamFiles:
-        shortReadDepth = calcReadDepth(bamFiles)
+        shortReadDepth = calcReadDepth(bamFiles, details)
     bamFiles = []
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'long':
@@ -1127,29 +1107,14 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             if bam:
                 bamFiles.append(bam)
     if bamFiles:
-        longReadDepth = calcReadDepth(bamFiles)
-    report = []
-    report.append("min_contig_length = %d"%min_contig_length)
-    report.append("min_contig_coverage = %.1f"%min_contig_coverage)
-    bad_contigs = []
-    details['circular_contigs'] = []
-    no_coverage_available = False
-    if not shortReadDepth and not longReadDepth:
-        no_coverage_available = True
-        comment = "No read coverage information available"
-        LOG.write(comment+"\n")
-        report.append(comment)
-    else:
-        if shortReadDepth:
-            comment = "Short read coverage information available"
-            LOG.write(comment+"\n")
-            report.append(comment)
-        if longReadDepth:
-            comment = "Long read coverage information available"
-            LOG.write(comment+"\n")
-            report.append(comment)
-    suboptimalContigs = ""
+        longReadDepth = calcReadDepth(bamFiles, details)
+    report = {}
+    report['min_contig_length_threshold'] = "%d"%min_contig_length
+    report["min_contig_coverage_threshold"] = "%.1f"%min_contig_coverage
+    report['short read coverage available'] = bool(shortReadDepth and len(shortReadDepth) )
+    report['long read coverage available'] = bool(longReadDepth and len(longReadDepth) )
     num_good_contigs = num_bad_contigs = 0
+    suboptimalContigs = ""
     total_seq_length = 0
     weighted_short_read_coverage = 0
     weighted_long_read_coverage = 0
@@ -1160,6 +1125,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             seqId=None
             seq = ""
             contigIndex = 1
+            num_circular_contigs = 0
             line = "1"
             while line:
                 line = IN.readline()
@@ -1172,16 +1138,16 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         contigCoverage = 0
                         short_read_coverage = 0
                         long_read_coverage = 0
+                        passes_coverage_threshold = not (report['short read coverage available'] and report['long read coverage available'])
                         if shortReadDepth and seqId in shortReadDepth:
                             short_read_coverage, normalizedDepth = shortReadDepth[seqId]
                             contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
+                            passes_coverage_threshold = short_read_coverage >= min_contig_coverage
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                        if "contigCircular" in details and contigIndex in details["contigCircular"]:
-                            contigInfo += " circular=true"
-                            details['circular_contigs'].append(contigId+contigInfo)
-                        if len(seq) >= min_contig_length and (no_coverage_available or max(short_read_coverage, long_read_coverage) >= min_contig_coverage):
+                            passes_coverage_threshold = long_read_coverage >= min_contig_coverage
+                        if passes_coverage_threshold:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
@@ -1193,8 +1159,9 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                             total_seq_length += len(seq)
                         else:
                             suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
-                            bad_contigs.append(contigId+contigInfo)
                             num_bad_contigs += 1
+                        if "circular=true" in line:
+                            num_circular_contigs += 1
                         seq = ""
                     if m:
                         seqId = m.group(1)
@@ -1202,16 +1169,17 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                     seq += line.rstrip()
     if total_seq_length:
         if weighted_short_read_coverage:
-            details['assembly']['short_read_coverage'] = weighted_short_read_coverage / total_seq_length
+            report['average short read coverage'] = "%.3f"%(weighted_short_read_coverage / total_seq_length)
         if weighted_long_read_coverage:
-            details['assembly']['long_read_coverage'] = weighted_long_read_coverage / total_seq_length
-    report.append("Number of contigs above thresholds: %d"%num_good_contigs)
-    report.append("Number of contigs below thresholds: %d"%num_bad_contigs)
+            report['average long read coverage'] = "%.3f"%(weighted_long_read_coverage / total_seq_length)
+    report['num contigs above thresholds'] = "%d"%num_good_contigs
+    report['num contigs below thresholds'] = "%d"%num_bad_contigs
+    report['total length of good contigs'] = "%d"%total_seq_length
+    if num_circular_contigs:
+        report['contigs predicted circular'] = "%d"%num_circular_contigs
     if suboptimalContigs:
-        details['bad_contigs'] = bad_contigs
         suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
-        report.append("bad contigs written to "+suboptimalContigsFile)
-        details['assembly']['suboptimal_contigs'] = suboptimalContigsFile
+        report["suboptimal contigs file"] = suboptimalContigsFile
         suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
         with open(suboptimalContigsFile, "w") as SUBOPT:
             SUBOPT.write(suboptimalContigs)
@@ -1262,10 +1230,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     if version_text:
         version_text = version_text.split("\n")[1]
     proc.wait()
-    details["assembly"] = { 
-                'assembler': version_text,
-                'problem' : []
-                }
+    details["assembly"]['assembler'] = 'unicycler'
+    details["assembly"]['version'] = version_text
     details["version"]["unicycler"] = version_text
     command = ["unicycler", "-t", str(threads), "-o", '.']
     if min_contig_length:
@@ -1312,6 +1278,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     if not (os.path.exists("assembly.fasta") and os.path.getsize("assembly.fasta")):
         comment = "First run of Unicycler resulted in no assembly, try again with more lenient parameters."
         LOG.write(comment+"\n")
+        if 'problem' not in details['assembly']:
+            details["assembly"]["problem"] = []
         details["assembly"]["problem"].append(comment)
         command.extend(("--mode", "bold", "--min_component_size", "300", "--min_dead_end_size", "300", "--depth_filter", "0.1"))
         comment = "re-run unicycler with command = "+" ".join(command)
@@ -1344,25 +1312,17 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         comment = "Unicycler failed to generate assembly file. Check "+unicyclerLogFile
         LOG.write(comment+"\n")
         details["assembly"]["outcome"] = comment
+        if 'problem' not in details['assembly']:
+            details['assembly']['problem'] = []
         details["assembly"]["problem"].append(comment)
         return None
-    contigCircular = []
-    with open("assembly.fasta") as F:
-        contigIndex = 1
-        for line in F:
-            if line.startswith(">"):
-                if "circular=true" in line:
-                    contigCircular.append(contigIndex) 
-                contigIndex += 1
-    if len(contigCircular):
-        details["contigCircular"] = contigCircular
 
     assemblyGraphFile = prefix+"assembly_graph.gfa"
     shutil.move("assembly.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
 
     contigsFile = "contigs.fasta"
     shutil.move("assembly.fasta", contigsFile) #rename to canonical name
-    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    details["assembly"]["contigs.fasta file size"] = os.path.getsize(contigsFile)
     return contigsFile
 
 def runSpades(details, args):
@@ -1370,17 +1330,19 @@ def runSpades(details, args):
     LOG.write("runSpades: elapsed seconds = %f\n"%(time()-START_TIME))
     if args.illumina and args.iontorrent:
         comment = "SPAdes is not meant to process both Illumina and IonTorrent reads in the same run"
+        if 'problem' not in details['assembly']:
+            details['assembly']['problem'] = []
         details["assembly"]["problem"].append(comment)
         LOG.write(comment+"\n")
 
     command = ["spades.py", "--version"]
-    proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+    proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     version_text = proc.stdout.read().decode().strip()
+    if not version_text: # as of v3.14.1 this output came to stderr instead of stdout
+        version_text = proc.stderr.read().decode().strip()
     proc.wait()
-    details["assembly"] = { 
-        'assembler': version_text,
-        'problem' : []
-        }
+    details["assembly"]['assembler'] = 'SPAdes'
+    details["assembly"]['version'] = version_text
     details["version"]["spades.py"] = version_text
 
 
@@ -1422,6 +1384,8 @@ def runSpades(details, args):
     if return_code and not os.path.exists(contigsFile):
         comment = "spades return code = %d, attempt re-running with controlled k-mer"%return_code
         LOG.write(comment+"\n")
+        if 'problem' not in details['assembly']:
+            details['assembly']['problem'] = []
         details['assembly']['problem'].append(comment)
         #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
         kdirs = glob.glob("K*")
@@ -1485,6 +1449,12 @@ def runMinimap(contigFile, longReadFastq, details, threads=1, outformat='sam'):
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
     """
     LOG.write("runMinimap(%s, %s, details, %d, %s)\n"%(contigFile, longReadFastq, threads, outformat))
+    if 'minimap2' not in details['version']:
+        command = ["minimap2", "--version"]
+        proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stdout.read().decode()
+        details["version"]['minimap2'] = version_text.strip()
     # index contig sequences
     contigIndex = contigFile.replace(".fasta", ".mmi")
     command = ["minimap2", "-t", str(threads), "-d", contigIndex, contigFile] 
@@ -1545,16 +1515,17 @@ def convertSamToBam(samFile, details, threads=1):
     LOG.flush()
     #os.remove(samFile) #save a little space
 
-    #command = ["samtools", "sort", "-o", bamFileSorted, bamFileUnsorted]
-    #return_code = subprocess.check_call(command, shell=False, stderr=LOG)
-
     bamFileSorted = samFilePrefix+".bam" 
-    command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
-    LOG.write("executing:\n"+' '.join(command)+"\n")
-    with open(bamFileSorted, 'w') as OUT:
-        p = subprocess.Popen(command, shell=False, stdout=OUT)
-        return_code = p.wait()
-        OUT.close()
+    command = ["samtools", "sort", "-@", str(sortThreads), "-o", bamFileSorted, samFilePrefix+"_unsorted.bam"]
+    return_code = subprocess.check_call(command, shell=False, stderr=LOG)
+
+    # this way to call samtools sort is for verion 0.1.19
+    #command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
+    #LOG.write("executing:\n"+' '.join(command)+"\n")
+    #with open(bamFileSorted, 'w') as OUT:
+    #    p = subprocess.Popen(command, shell=False, stdout=OUT)
+    #    return_code = p.wait()
+    #    OUT.close()
 
     if return_code != 0:
         comment = "samtools sort returned %d, convertSamToBam failed"%return_code
@@ -1588,6 +1559,12 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write('runRacon(%s, %s, details, %d)\n'%(contigFile, longReadsFastq, threads))
+    if 'racon' not in details['version']:
+        command = ["racon", "--version"]
+        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stderr.read().decode()
+        details["version"]['racon'] = version_text.strip()
     readsToContigsSam = runMinimap(contigFile, longReadsFastq, details, threads, outformat='sam')
     raconStartTime = time()
     raconContigs = contigFile.replace(".fasta", ".racon.fasta")
@@ -1603,9 +1580,10 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     raconContigSize = os.path.getsize(raconContigs)
     if raconContigSize < 10:
         return None
+    details['polishing'].append({"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "output": raconContigs})
     comment = "racon, input %s, output %s"%(contigFile, raconContigs)
     LOG.write(comment+"\n")
-    details["post-assembly transformation"].append(comment)
+    #details["post-assembly transformation"].append(comment)
     return raconContigs
 
 def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
@@ -1658,6 +1636,12 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
         details['problem'].append(comment)
         LOG.write(comment+"\n")
         return
+    if 'pilon' not in details['version']:
+        command = ["java", "-jar", pilon_jar, "--version"]
+        proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stdout.read().decode()
+        details["version"]['pilon'] = version_text.strip()
 
     bamFile = runBowtie(contigFile, shortReadFastq, details, threads=threads, outformat='bam')
     if not bamFile:
@@ -1679,18 +1663,26 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     if return_code != 0:
         return None
     pilonContigs = pilonPrefix+".fasta"
-    details['pilon_changes'] = 0
+    pilon_changes = 0
     with open(pilonContigs.replace(".fasta", ".changes")) as CHANGES:
-        details['pilon_changes'] = len(CHANGES.read().splitlines())
-
-    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, details['pilon_changes'])
+        pilon_changes = len(CHANGES.read().splitlines())
+    details['polishing'].append({"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes})
+    comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
-    details["post-assembly transformation"].append(comment)
+    #details["post-assembly transformation"].append(comment)
     return pilonContigs 
 
-def calcReadDepth(bamfiles):
+def calcReadDepth(bamfiles, details):
     """ Return dict of contig_ids to tuple of (coverage, normalized_coverage) """
     LOG.write("calcReadDepth(%s)\n"%" ".join(bamfiles))
+    if 'samtools' not in details['version']:
+        command = ["samtools"]
+        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+        proc.wait()
+        version_text = proc.stderr.read().decode()
+        for line in version_text.splitlines():
+            if 'Version' in line:
+                details["version"]['samtools'] = line.strip()
     readDepth = {}
     command = ["samtools", "depth"]
     if type(bamfiles) is str:
@@ -1779,6 +1771,8 @@ usage: canu [-version] [-citation] \
     p = subprocess.Popen([canu_exec, "--version"], shell=False, stdout=subprocess.PIPE)
     canu_version = p.stdout.readline().decode().rstrip()
     details['version']['canu'] = canu_version
+    details['assembly']['version'] = canu_version
+    details['assembly']['assembler'] = 'canu'
     p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
@@ -1830,11 +1824,8 @@ usage: canu [-version] [-citation] \
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
-    details["assembly"] = { 
-                'assembly_elapsed_time' : elapsedHumanReadable,
-                'assembler': canu_version,
-                'command_line': " ".join(command)
-                }
+    details["assembly"]['elapsed_time'] = elapsedHumanReadable
+    details["assembly"]['command_line'] = " ".join(command)
 
     LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
     if os.path.exists("canu.report"):
@@ -1863,119 +1854,137 @@ usage: canu [-version] [-citation] \
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
-    HTML.write("<head><style>\n.a { margin-left: 3em; margin-top: 1em; margin-bottom: 1em}\n")
+    HTML.write("<!DOCTYPE html><html><head>\n")
+    HTML.write("<link href=\"https://fonts.googleapis.com/css?family=Work+Sans:300,400,500,600,700,800,900\" rel=\"stylesheet\">\n")
+    HTML.write("""
+<style>
+ body {
+    font-family: 'Work Sans', sans-serif;
+    color: #444;
+    }
+ header { padding-bottom: .5in; }
+ section { margin-bottom: .5in; }
+
+ a {
+    text-decoration: none;
+    color: #0d78ef;
+    }
+ a:hover { text-decoration: underline; }
+ h2 { font-size: 1.45em; }
+ h2, h3 { font-weight: 500; }
+ h2 small { color: #888; font-size: 0.65em; }
+ .pull-left { float: left; }
+ .pull-right { float: right; }
+ sup { display: inline-block; }
+
+ table-num,
+ table-ref,
+ fig-num,
+ fig-ref {
+     font-weight: 600;
+     }
+
+ /* tables */
+ table {
+     margin: .1in 0 .5in 0;
+     border-collapse: collapse;
+     page-break-inside: avoid;
+     }
+ .table-header {
+     color: #fff;
+     background: #196E9C;
+     padding: 5px;
+     text-align: left;
+     }
+ .table-header th { font-weight: 400; }
+ .row-header { border-bottom: 1px solid #196E9C; font-weight: 600; }
+ th, td { padding: 5px; }
+ th { border-bottom: 2px solid #196E9C; }
+ tr:last-child { border-bottom: 1px solid #196E9C; }
+
+ .kv-table,
+ .kv-table-2 {
+     text-align: left;
+     }
+
+ .kv-table-2 td:nth-child(2) {
+     border-right: 1px solid rgb(172, 172, 172)
+     }
+
+ .kv-table td:first-child,
+ .kv-table-2 td:first-child,
+ .kv-table-2 td:nth-child(3) {
+     font-weight: 700;
+     }
+
+ table td.align-right {
+     text-align: right;
+     }
+
+ .kv-table-2 td:nth-child(2) { padding-right: 10px; }
+ .kv-table-2 td:nth-child(3) { padding-left: 10px; }
+ .lg-table { width: 80%; }
+ .med-table { width: 60%; }
+ .sm-table { width: 40%; }
+ .xs-table {width: 20%; }
+
+ .center { margin-left: auto; margin-right: auto; }
+
+ .logo {
+ width: 2.5in;
+ border-right: 3px solid #777;
+ padding-right: 10px;
+ margin-right: 10px;
+ }
+ .title {
+ padding: 17px 0 0 0px;
+ font-size: 1.3em;
+ color: #777;
+ }
+ .report-info {
+ text-align: right;
+ margin-right: 30px;
+ font-size:.8em;
+ color: #777;
+ }
+ .report-info span {
+ font-weight: 600;
+ }
+
+ .main-img {
+ width: 250px;
+ margin-right: .2in;
+ }
+
+ ol.references li {
+ margin-bottom: 1em;
+ }
+
+ .clearfix:after {
+ visibility: hidden;
+ display: block;
+ font-size: 0;
+ content: " ";
+ clear: both;
+ height: 0;
+ }
+ .clearfix { display: inline-block; }
+
+ * html .clearfix { height: 1%; }
+ .clearfix { display: block; }
+    .a { margin-left: 3em; margin-top: 1em; margin-bottom: 1em}\n")
     HTML.write(".b {margin-left: 3em }\n")
     HTML.write("span.header { font-size: large; font-weight: bold; margin-left: -2em}\n")
-    HTML.write("</style></head>\n")
+ """)
+    
+    HTML.write("</style></head><body><header>\n")
+    HTML.write('<div class="report-info pull-right">\n')
+    HTML.write('<span>Report Date:</span> '+strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+'<br>\n')
+    HTML.write('</div></header>\n')
     HTML.write("<h1>Genome Assembly Report</h1>\n")
-    HTML.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
-
-    HTML.write("<div class='a'><span class='header'>Input Reads:</span><br>\n")
-    for item in details['reads']:
-        if 'supercedes' in details['reads'][item]:
-            continue # this is a derived item, not original input
-        HTML.write("<b>"+item+"</b>\n<table>")
-        for key in ('platform', 'layout', 'avg_len', 'max_read_len', 'min_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
-            if key in details['reads'][item]:
-                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
-        HTML.write("</table>\n")
-        if "problem" in details['reads'][item] and details['reads'][item]['problem']:
-            HTML.write("<div class='b'><b>Issues with read set "+item+"</b>\n<ul>")
-            for prob in details['reads'][item]['problem']:
-                HTML.write("<li>"+prob+"\n")
-            HTML.write("</ul></div>\n")
-        HTML.write("</div>\n")
-    
-    if details["pre-assembly transformation"]:
-        HTML.write("<div class='a'><span class='header'>Pre-Assembly Transformations:</span><br>\n")
-        for line in details["pre-assembly transformation"]:
-            HTML.write(line+"<br>\n")
-        HTML.write("</div>\n")
-
-    if "trim report" in details:
-        HTML.write("<div class='a'><span class='header'>Trimming Report:</span><br>\n")
-        for reads in details["trim report"]:
-            HTML.write("<b>"+reads+"</b><ul>")
-            for report in details["trim report"][reads]:
-                if os.path.exists(os.path.join(DETAILS_DIR, report)):
-                    HTML.write("<pre>\n")
-                    HTML.write(open(os.path.join(DETAILS_DIR, report)).read())
-                    HTML.write("\n</pre>\n")
-        HTML.write("</div>\n")
-
-    if details['derived_reads']:
-        HTML.write("<div class='a'><span class='header'>Transformed Reads:</span><br>\n")
-        for item in details['derived_reads']:
-            HTML.write("<b>"+item+"</b><br>\n")
-            HTML.write(item+"<table>")
-            for key in sorted(details['reads'][item]):
-                if key == 'problem':
-                    continue
-                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
-            HTML.write("</table>\n")
-            if "problem" in details['reads'][item] and details['reads'][item]['problem']:
-                HTML.write("<div class='b'><b>Problems with read set "+item+"</b><br>\n")
-                for prob in details['reads'][item]['problem']:
-                    HTML.write(prob+"<br>\n")
-                HTML.write("</div>\n")
-        HTML.write("</div>\n")
-
-    HTML.write("<div class='a'><span class='header'>Assembly:</span><br>\n")
-    if 'assembly' in details:
-        HTML.write("<table>")
-        for key in sorted(details['assembly']):
-            if key == "problem":
-                continue
-            HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
-        HTML.write("</table>\n")
-        if "problem" in details['assembly'] and details['assembly']['problem']:
-            HTML.write("<div class='b'><b>Problem with assembly "+item+"</b>\n<ul>")
-            for prob in details['assembly']['problem']:
-                HTML.write("<li>"+prob+"\n")
-            HTML.write("</ul></div>\n")
-    else:
-        HTML.write("<p>None</p>\n")
-    HTML.write("</div>\n")
-
-    if "quast_txt" in details:
-        HTML.write("<div class='a'><span class='header'>Quast Report:</span><br>\n")
-        HTML.write("<a href='%s'>%s</a><br>\n"%(details["quast_html"], "Quast html report"))
-        HTML.write("</table>\n")
-        if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
-            HTML.write("<pre>\n")
-            HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
-            HTML.write("\n</pre>\n")
-        HTML.write("</div>\n")
-    
-    if details["post-assembly transformation"]:
-        HTML.write("<div class='a'><span class='header'>Post-Assembly Transformations:</span><br>\n")
-        for line in details['post-assembly transformation']:
-            HTML.write(line+"<br>\n")
-        HTML.write("</div>\n")
-
-    if "circular_contigs" in details and details['circular_contigs']:
-        HTML.write("<div class='a'><span class='header'>Circular Contigs:</span><br>\n")
-        HTML.write("<b>As suggested by Unicycler</b>\n")
-        for line in details['circular_contigs']:
-            HTML.write(line+"<br>\n")
-        HTML.write("</div>\n")
-
-    if "contig_filtering" in details and details['contig_filtering']:
-        HTML.write("<div class='a'><span class='header'>Contig Filtering:</span><br>\n")
-        for line in details['contig_filtering']:
-            HTML.write(line+"<br>\n")
-
-        if "bad_contigs" in details and details["bad_contigs"]:
-            HTML.write("<b>Contigs Below Thresholds</b> ")
-            if len(details["bad_contigs"]) > 5:
-                HTML.write("(Showing first 5 entries)\n")
-            HTML.write("<div class='b'>\n")
-            for line in details['bad_contigs'][:5]:
-                HTML.write(line+"<br>\n")
-            HTML.write("</div>\n")
-        HTML.write("</div>\n")
 
     if "Bandage" in details and "plot" in details["Bandage"]:
+        HTML.write('<section>\n<h2>Assembly Plot</h2>\n')
         if os.path.exists(details["Bandage"]["plot"]):
 
             svg_text = open(details["Bandage"]["plot"]).read()
@@ -1984,7 +1993,115 @@ def write_html_report(htmlFile, details):
             HTML.write(details["Bandage"]["version"]+"\n")
             HTML.write(svg_text+"\n\n")
             HTML.write("</div>\n")
+        HTML.write("</section>\n")
+
+    if 'assembly' in details:
+        HTML.write('<section>\n<h2>Assembly</h2>\n')
+        HTML.write("""
+        <table class="med-table kv-table">
+            <thead class="table-header">
+            <tr> <th colspan="2"> Assembly Process </th></tr></thead>
+            <tbody>
+            """)
+        for key in sorted(details['assembly']):
+            if key == "problem":
+                continue
+            HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['assembly'][key])))
+        if "problem" in details['assembly'] and details['assembly']['problem']:
+            HTML.write('<tr><td colspan="2">Issues with assembly: </td></tr>')
+            for prob in details['assembly']['problem']:
+                HTML.write('<tr><td colspan="2">%s:</td></tr>\n'%(prob))
+        HTML.write("</tbody></table>\n")
+        HTML.write("</section>\n")
+
+    if 'polishing' in details:
+        HTML.write('<section>\n<h2>Polishing</h2>\n')
+        HTML.write("""
+        <table class="med-table kv-table">
+            <thead class="table-header">
+            <tr> <th colspan="2"> Polishing Rounds </th></tr></thead>
+            <tbody>
+            """)
+        for round, info in enumerate(details['polishing']):
+            HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", round+1))
+            for key in sorted(info):
+                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(info[key])))
+            HTML.write("<tr></tr>\n") # blank row
+        HTML.write("</tbody></table>\n")
+        HTML.write("</section>\n")
+
+    if "contig_filtering" in details and details['contig_filtering']:
+        HTML.write('<section>\n<h2>Filtering Contigs on Length and Coverage</h2>\n')
+        HTML.write("""
+        <table class="med-table kv-table">
+            <thead class="table-header">
+            <tr> <th colspan="2"> Contig Filtering </th></tr></thead>
+            <tbody>
+            """)
+        for key in sorted(details['contig_filtering']):
+            HTML.write("<tr><td>{}:</td><td>{}</td></tr>\n".format(key, details['contig_filtering'][key])) 
+        HTML.write("</tbody></table>\n")
+        HTML.write("</section>\n")
+
+    if "quast_txt" in details:
+        HTML.write("<section><h2>Quast Report</h2>\n")
+        HTML.write("<a href='%s'>%s</a><br>\n"%(details["quast_html"], "Quast html report"))
+        HTML.write("</table>\n")
+        if os.path.exists(os.path.join(SAVE_DIR, details["quast_txt"])):
+            HTML.write("<pre>\n")
+            HTML.write(open(os.path.join(SAVE_DIR, details["quast_txt"])).read())
+            HTML.write("\n</pre>\n")
+        HTML.write("</section>\n")
+    
+    HTML.write('<section>\n<h2>Input Reads</h2>\n')
+    for item in details['reads']:
+        if 'supercedes' in details['reads'][item]:
+            continue # this is a derived item, not original input
+        HTML.write("""
+        <table class="med-table kv-table">
+            <thead class="table-header">
+            <tr> <th colspan="2"> """ + item +""" </th></tr></thead>
+            <tbody>
+            """)
+        HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%("read file", item))
+        for key in ('platform', 'layout', 'num_reads', 'num_bases',
+                'avg_len', 'max_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
+            if key in details['reads'][item]:
+                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
+        if "problem" in details['reads'][item] and details['reads'][item]['problem']:
+            HTML.write('<tr><td colspan="2">Issues with read set '+item+'</td></tr>')
+            for prob in details['reads'][item]['problem']:
+                HTML.write('<tr><td colspan="2">%s:</td></tr>\n'%(prob))
+    HTML.write("</tbody></table>\n")
+    HTML.write("</section>\n")
+
+    if "trim report" in details:
+        HTML.write("<section><h2>Trimming Report</h2>\n")
+        for reads in details["trim report"]:
+            HTML.write("<b>"+reads+"</b><ul>")
+            for report in details["trim report"][reads]:
+                report_file = os.path.join(DETAILS_DIR, report)
+                if os.path.isfile(report_file):
+                    HTML.write("<pre>\n")
+                    HTML.write(open(report_file).read())
+                    HTML.write("\n</pre>\n")
+                else:
+                    LOG.write("could not open trim report from "+report_file+"\n")
+        HTML.write("</section>\n")
+
+    HTML.write("<section><h2>Tools Used:</h2>\n")
+    HTML.write("""
+        <table class="med-table kv-table">
+            <thead class="table-header">
+            <tr> <th colspan="2"> Tools Used </th></tr></thead>
+            <tbody>
+            """)
+    for key in sorted(details['version']):
+        HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['version'][key])))
+    HTML.write("</table>\n")
+    HTML.write("</section>\n")
     HTML.write("</html>\n")
+
     HTML.close()
 
 
@@ -2065,11 +2182,14 @@ def main():
     LOG.write("Work directory is "+WORK_DIR+"\n\n")
     LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
     LOG.write("Detailed output will be saved to "+DETAILS_DIR+"\n\n")
-    details = { 'logfile' : logfileName }
+    details = { 'logfile' : logfileName, 'assembly': {} }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
     details["original_items"] = []
     details["reads"] = {}
+    details["assembly"] = {}
+    details["coverage"] = {}
+    details["polishing"] = []
     details["version"] = {}
     details["problem"] = []
     details["derived_reads"] = []
@@ -2102,20 +2222,6 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore', max_bases=args.max_bases)
 
-    contigs = ""
-    if args.contigs:
-        if not os.path.exists(args.contigs):
-            comment = "Specified contigs file not found: "+args.contigs
-            LOG.write(comment+"\n")
-            details['problem'].append(comment)
-            sys.stderr.write(comment+"\n")
-            exit()
-        comment = "input contigs specified as "+args.contigs
-        LOG.write(comment+"\n")
-        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
-        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
-        contigs = "input_contigs.fasta"
-            
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
 
@@ -2137,17 +2243,28 @@ def main():
             else:
                 args.recipe = "unicycler"
 
+    contigs = ""
     if args.contigs:
-        LOG.write("analyzing pre-existing contigs.\n")
-        if not os.path.exists(contigs):
-            LOG.write("Problem: cannot find input contigs as "+contigs+"\n")
+        if not os.path.exists(args.contigs):
+            comment = "Specified contigs file not found: "+args.contigs
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+            sys.stderr.write(comment+"\n")
             exit()
+        details['assembly']['input_contigs'] = args.contigs
+        comment = "input contigs specified as "+args.contigs
+        LOG.write(comment+"\n")
+        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
+        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
+        contigs = "input_contigs.fasta"
+            
     elif args.recipe == "unicycler":
         contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix )
         if not contigs:
             comment = "unicycler failed to generate contigs, trying spades"
             LOG.write(comment+"\n")
             details['problem'].append(comment)
+            #details["pre-assembly transformation"].append(comment)
             contigs = runSpades(details, args)
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
@@ -2185,7 +2302,8 @@ def main():
                             contigs = pilonContigFile
                         else:
                             break
-                        if details['pilon_changes'] == 0:
+                        # check number of changes in most recent round, quit if zero
+                        if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
                             break
             
     if contigs and os.path.getsize(contigs):
