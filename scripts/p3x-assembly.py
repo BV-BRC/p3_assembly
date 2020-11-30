@@ -106,7 +106,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
             os.symlink(os.path.abspath(reads), os.path.join(WORK_DIR,file1))
         read_struct['files'].append(file1)
         #read_struct["path"].append(reads)
-    read_struct = study_reads(read_struct, max_bases)
+    read_struct = study_reads(read_struct)
     if max_bases and read_struct["num_bases"] > max_bases: 
         comment = "need to truncate file(s) {} to max_bases({})".format(read_struct['delim'].join(read_struct['files']), max_bases)
         LOG.write(comment+"\n")
@@ -188,25 +188,25 @@ def parseJsonParameters(args):
                     pass
     return
 
-def study_reads(read_data, max_bases=0):
+def study_reads(read_data):
     """
     Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
     """
     func_start = time()
     LOG.write("start study_reads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
-    read_data['layout'] = 'paired-end'
     read_data['avg_len'] = 0
     read_data['length_class'] = 'na'
     read_data['num_reads'] = 0
     read_data['num_bases'] = 0
     LOG.write("file(s): "+read_data['delim'].join(read_data['files'])+"\n")
-    if max_bases:
-        LOG.write("max base limit = {}\n".format(max_bases))
 
     file1 = read_data['files'][0]
     file2 = None
     if len(read_data['files']) > 1:
+        read_data['layout'] = 'paired-end'
         file2 = read_data['files'][1]
+    else:
+        read_data['layout'] = 'single-end'
     if file1.endswith("gz"):
         F1 = gzip.open(os.path.join(WORK_DIR, file1))
         if file2:
@@ -259,7 +259,13 @@ def study_reads(read_data, max_bases=0):
             if i % 4 == 1:
                 seqLen1 = len(line1)-1
                 seqLen2 = len(line2)-1
+                totalReadLength += (seqLen1 + seqLen2)
+                maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
+                minReadLength = min(minReadLength, seqLen1, seqLen2)
+                readNumber += 1
             elif i % 4 == 3:
+                minQualScore = min(minQualScore + line1.rstrip() + line2.rstrip())
+                maxQualScore = max(maxQualScore + line1.rstrip() + line2.rstrip())
                 if seqQualLenMatch:
                     if not (seqLen1 == len(line1)-1 and seqLen2 == len(line2)-1):
                         readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
@@ -267,24 +273,16 @@ def study_reads(read_data, max_bases=0):
                         comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
                         read_data["problem"].append(comment)
                         LOG.write(comment+"\n")
-            totalReadLength += seqLen1 + seqLen2
-            maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
-            minReadLength = min(minReadLength, seqLen1, seqLen2)
-            minQualScore = min(minQualScore + line1.rstrip() + line2.rstrip())
-            maxQualScore = max(maxQualScore + line1.rstrip() + line2.rstrip())
-            readNumber += 1
-            if readNumber % 100000 == 0:
-                LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
-                LOG.flush()
-            if (max_bases and (totalReadLength > max_bases)):
-                comment = "read files {},{} exceed maximum base limit {}".format(file1, file2, max_bases)
-                read_data['problem'].append(comment)
-                LOG.write(comment+"\n")
-                break
         else: # no line2 -- single-end reads
             if i % 4 == 1:
                 seqLen1 = len(line1)-1
+                totalReadLength += seqLen1
+                maxReadLength = max(maxReadLength, seqLen1) 
+                minReadLength = min(minReadLength, seqLen1)
+                readNumber += 1
             elif i % 4 == 3:
+                minQualScore = min(minQualScore + line1.rstrip())
+                maxQualScore = max(maxQualScore + line1.rstrip())
                 if seqQualLenMatch:
                     if not (seqLen1 == len(line1)-1):
                         readId = read_id_1
@@ -292,20 +290,9 @@ def study_reads(read_data, max_bases=0):
                         comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
                         read_data["problem"].append(comment)
                         LOG.write(comment+"\n")
-            totalReadLength += seqLen1
-            maxReadLength = max(maxReadLength, seqLen1) 
-            minReadLength = min(minReadLength, seqLen1)
-            minQualScore = min(minQualScore + line1.rstrip())
-            maxQualScore = max(maxQualScore + line1.rstrip())
-            readNumber += 1
-            #if readNumber % 100000 == 0:
-            #    LOG.write("number of reads studied so far: {}\n".format(readNumber))
-            #    LOG.flush()
-            if max_bases and (totalReadLength > max_bases):
-                comment = "read file {} exceeds maximum base limit {}".format(file1, max_bases)
-                read_data['problem'].append(comment)
-                LOG.write(comment+"\n")
-                break
+        if False and readNumber % 100000 == 0:
+            LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
+            LOG.flush()
 
     F1.close()
     if file2:
@@ -389,6 +376,10 @@ def subsample_reads(read_data, max_bases=0):
     LOG.write("subsamplePairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
 
     truncated_read_data = read_data.copy()
+    if 'num_bases' in read_data:
+        truncated_read_data['num_bases_original'] = read_data['num_bases']
+    if 'num_reads' in read_data:
+        truncated_read_data['num_reads_original'] = read_data['num_reads']
 
     file1 = read_data['files'][0]
     file2 = None
@@ -1561,9 +1552,11 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     LOG.write('runRacon(%s, %s, details, %d)\n'%(contigFile, longReadsFastq, threads))
     if 'racon' not in details['version']:
         command = ["racon", "--version"]
-        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
         proc.wait()
         version_text = proc.stderr.read().decode()
+        if not version_text:
+            version_text = proc.stdout.read().decode()
         details["version"]['racon'] = version_text.strip()
     readsToContigsSam = runMinimap(contigFile, longReadsFastq, details, threads, outformat='sam')
     raconStartTime = time()
@@ -2064,7 +2057,7 @@ def write_html_report(htmlFile, details):
             <tbody>
             """)
         HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%("read file", item))
-        for key in ('platform', 'layout', 'num_reads', 'num_bases',
+        for key in ('platform', 'layout', 'num_reads', 'num_reads_original', 'num_bases', 'num_bases_original',
                 'avg_len', 'max_read_len', 'num_read', 'sample_read_id'):  #sorted(details['reads'][item]):
             if key in details['reads'][item]:
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(details['reads'][item][key])))
@@ -2222,6 +2215,18 @@ def main():
         for item in args.nanopore:
             registerReads(item, details, platform = 'nanopore', max_bases=args.max_bases)
 
+    if args.contigs:
+        if not os.path.exists(args.contigs):
+            comment = "Specified contigs file not found: "+args.contigs
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
+            sys.stderr.write(comment+"\n")
+            exit()
+        details['assembly']['input_contigs'] = args.contigs
+        comment = "input contigs specified as "+args.contigs
+        LOG.write(comment+"\n")
+        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
+        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
 
@@ -2245,17 +2250,6 @@ def main():
 
     contigs = ""
     if args.contigs:
-        if not os.path.exists(args.contigs):
-            comment = "Specified contigs file not found: "+args.contigs
-            LOG.write(comment+"\n")
-            details['problem'].append(comment)
-            sys.stderr.write(comment+"\n")
-            exit()
-        details['assembly']['input_contigs'] = args.contigs
-        comment = "input contigs specified as "+args.contigs
-        LOG.write(comment+"\n")
-        LOG.write("symlinking %s to %s\n"%(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta")))
-        os.symlink(os.path.abspath(args.contigs), os.path.join(WORK_DIR,"input_contigs.fasta"))
         contigs = "input_contigs.fasta"
             
     elif args.recipe == "unicycler":
