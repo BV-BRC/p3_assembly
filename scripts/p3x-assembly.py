@@ -193,7 +193,7 @@ def study_reads(read_data):
     Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
     """
     func_start = time()
-    LOG.write("start study_reads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
+    LOG.write("\nstart study_reads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
     read_data['avg_len'] = 0
     read_data['length_class'] = 'na'
     read_data['num_reads'] = 0
@@ -236,7 +236,7 @@ def study_reads(read_data):
     totalReadLength = 0
     seqQualLenMatch = True
     maxReadLength = 0
-    minReadLength = 1e6
+    #minReadLength = 1e6
     maxQualScore = chr(0)
     minQualScore = chr(255)
     readNumber = 0
@@ -261,7 +261,7 @@ def study_reads(read_data):
                 seqLen2 = len(line2)-1
                 totalReadLength += (seqLen1 + seqLen2)
                 maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
-                minReadLength = min(minReadLength, seqLen1, seqLen2)
+                #minReadLength = min(minReadLength, seqLen1, seqLen2)
                 readNumber += 1
             elif i % 4 == 3:
                 minQualScore = min(minQualScore + line1.rstrip() + line2.rstrip())
@@ -274,20 +274,21 @@ def study_reads(read_data):
                         read_data["problem"].append(comment)
                         LOG.write(comment+"\n")
         else: # no line2 -- single-end reads
+            if i % 4 == 0:
+                read_id = line1.split(' ')[0] # get part up to first space, if any 
             if i % 4 == 1:
                 seqLen1 = len(line1)-1
                 totalReadLength += seqLen1
                 maxReadLength = max(maxReadLength, seqLen1) 
-                minReadLength = min(minReadLength, seqLen1)
+                # minReadLength = min(minReadLength, seqLen1)
                 readNumber += 1
             elif i % 4 == 3:
                 minQualScore = min(minQualScore + line1.rstrip())
                 maxQualScore = max(maxQualScore + line1.rstrip())
                 if seqQualLenMatch:
                     if not (seqLen1 == len(line1)-1):
-                        readId = read_id_1
                         seqQualLenMatch = False
-                        comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
+                        comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
                         read_data["problem"].append(comment)
                         LOG.write(comment+"\n")
         if False and readNumber % 100000 == 0:
@@ -303,7 +304,7 @@ def study_reads(read_data):
         avgReadLength/=2
     read_data['avg_len'] = avgReadLength
     read_data['max_read_len'] = maxReadLength
-    read_data['min_read_len'] = minReadLength
+    #read_data['min_read_len'] = minReadLength
     read_data['num_reads'] = readNumber
     read_data['num_bases'] = totalReadLength
     read_data['sample_read_id'] = sample_read_id 
@@ -333,7 +334,7 @@ def studyFastaReads(read_data):
     seqLen = 0
     totalReadLength = 0
     maxReadLength = 0
-    minReadLength = 1e6
+    #minReadLength = 1e6
     readNumber = 0
     F = open(read_data['files'][0])
     for line in F:
@@ -343,7 +344,7 @@ def studyFastaReads(read_data):
                 seqLen = len(seq)
                 totalReadLength += seqLen
                 maxReadLength = max(maxReadLength, seqLen) 
-                minReadLength = min(minReadLength, seqLen)
+                #minReadLength = min(minReadLength, seqLen)
                 seq = ""
             else:
                 sample_read_id = line.split()[0]
@@ -353,12 +354,12 @@ def studyFastaReads(read_data):
         seqLen = len(seq)
         totalReadLength += seqLen
         maxReadLength = max(maxReadLength, seqLen) 
-        minReadLength = min(minReadLength, seqLen)
+        #minReadLength = min(minReadLength, seqLen)
 
     avgReadLength = totalReadLength/readNumber
     read_data['avg_len'] = avgReadLength
     read_data['max_read_len'] = maxReadLength
-    read_data['min_read_len'] = minReadLength
+    #read_data['min_read_len'] = minReadLength
     read_data['num_reads'] = readNumber
     read_data['sample_read_id'] = sample_read_id 
     read_data['platform'] = 'fasta'
@@ -1219,7 +1220,9 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
     version_text = proc.stdout.read().decode()
     if version_text:
-        version_text = version_text.split("\n")[1]
+        m = re.search("Unicycler\s+\S+", version_text, flags=re.IGNORECASE)
+        if m:
+            version_text = m.group(0) # entire match
     proc.wait()
     details["assembly"]['assembler'] = 'unicycler'
     details["assembly"]['version'] = version_text
@@ -2290,8 +2293,6 @@ def main():
                     continue # may have been superceded by trimmed version of those reads
                 if details['reads'][readFastq]['length_class'] == 'short':
                     for iteration in range(0, args.pilon_iterations):
-                        LOG.write("runPilon(%s, %s, details, %s, threads=%d) iteration=%d\n"%(contigs, readFastq, args.pilon_jar, args.threads, iteration))
-                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, threads=args.threads)
                         if pilonContigFile is not None:
                             contigs = pilonContigFile
                         else:
