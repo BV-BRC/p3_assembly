@@ -107,12 +107,17 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         read_struct['files'].append(file1)
         #read_struct["path"].append(reads)
     read_struct = study_reads(read_struct)
-    if max_bases and read_struct["num_bases"] > max_bases: 
-        comment = "need to truncate file(s) {} to max_bases({})".format(read_struct['delim'].join(read_struct['files']), max_bases)
+    if read_struct["platform"] == 'fasta':
+        comment = "sequences are FASTA, cannot process"
+        LOG.write(comment)
+        sys.stdout.write(comment)
+        sys.exit(1)
+    too_long = max_bases and read_struct["num_bases"] > max_bases 
+    if too_long or ("seq_qual_lengths_differ" in read_struct and read_struct["seq_qual_lengths_differ"]):
+        comment = "need to re-write files {}".format(read_struct['delim'].join(read_struct['files']))
         LOG.write(comment+"\n")
         sys.stderr.write(comment+"\n")
-        read_struct = subsample_reads(read_struct, max_bases=max_bases)
-        limit = "{} bases".format(max_bases)
+        read_struct = rewrite_reads(read_struct, max_bases=max_bases)
         comment = "max_bases limit exceeded, trucating to approximately {} bases".format(max_bases)
         if 'problem' not in read_struct:
             read_struct['problem'] = []
@@ -190,7 +195,8 @@ def parseJsonParameters(args):
 
 def study_reads(read_data):
     """
-    Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
+    Determine avg read length. Update details['reads'].
+    If paired, read both files. Verify read ID are paired. 
     """
     func_start = time()
     LOG.write("\nstart study_reads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
@@ -227,8 +233,8 @@ def study_reads(read_data):
         F1.close()
         if file2:
             F2.close()
-        studyFastaReads(read_data)
-        return
+        read_data = studyFastaReads(read_data)
+        return read_data
     
     read_ids_paired = True
     seqLen1 = 0
@@ -243,6 +249,8 @@ def study_reads(read_data):
     for i, line1 in enumerate(F1):
         if file2:
             line2 = F2.readline()
+            if not line2:
+                break # cannot process any more
             if not line2:
                 comment = "Number of reads differs between {} and {} after {}".format(file1, file2, readNumber)
                 LOG.write(comment+"\n")
@@ -271,7 +279,9 @@ def study_reads(read_data):
                         readId = [read_id_1, read_id_2][seqLen1 != len(line1)-1]
                         seqQualLenMatch = False
                         comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, readId)
-                        read_data["problem"].append(comment)
+                        if len(read_data["problem"]) < 50:
+                            read_data["problem"].append(comment)
+                        read_data["seq_qual_lengths_differ"] = True
                         LOG.write(comment+"\n")
         else: # no line2 -- single-end reads
             if i % 4 == 0:
@@ -289,7 +299,9 @@ def study_reads(read_data):
                     if not (seqLen1 == len(line1)-1):
                         seqQualLenMatch = False
                         comment = "sequence and quality strings differ in length at read %d %s"%(readNumber, read_id)
-                        read_data["problem"].append(comment)
+                        if len(read_data["problem"]) < 50:
+                            read_data["problem"].append(comment)
+                        read_data["seq_qual_lengths_differ"] = True
                         LOG.write(comment+"\n")
         if False and readNumber % 100000 == 0:
             LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
@@ -322,6 +334,7 @@ def study_reads(read_data):
             comment += "study_reads: {} is {}\n".format(key, read_data[key])
         LOG.write(comment)
     LOG.write("duration of study_reads was %d seconds\n"%(time() - func_start))
+    LOG.flush()
     return read_data
 
 def studyFastaReads(read_data):
@@ -367,20 +380,20 @@ def studyFastaReads(read_data):
     read_data['length_class'] = ["short", "long"][maxReadLength >= MAX_SHORT_READ_LENGTH]
 
     LOG.write("duration of studyFastaReads was %d seconds\n"%(time() - func_start))
-    return
+    return read_data
 
-def subsample_reads(read_data, max_bases=0):
+def rewrite_reads(read_data, max_bases=0):
     """
     Read both files. Verify read ID are paired. Determine avg read length. Update details['reads'].
     """
     func_start = time()
     LOG.write("subsamplePairedReads() time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(func_start)), func_start - START_TIME))
 
-    truncated_read_data = read_data.copy()
+    output_read_data = read_data.copy()
     if 'num_bases' in read_data:
-        truncated_read_data['num_bases_original'] = read_data['num_bases']
+        output_read_data['num_bases_original'] = read_data['num_bases']
     if 'num_reads' in read_data:
-        truncated_read_data['num_reads_original'] = read_data['num_reads']
+        output_read_data['num_reads_original'] = read_data['num_reads']
 
     file1 = read_data['files'][0]
     file2 = None
@@ -408,44 +421,73 @@ def subsample_reads(read_data, max_bases=0):
             F2 = open(os.path.join(WORK_DIR, file2))
             out_file2 = file2+suffix
 
-    truncated_read_data['files']=[out_file1]
+    output_read_data['files']=[out_file1]
     if file2:
-            truncated_read_data['files'].append(out_file2)
+            output_read_data['files'].append(out_file2)
 
-    truncated_read_data['files'] = (out_file1, out_file2)[:len(read_data['files'])]
+    output_read_data['files'] = (out_file1, out_file2)[:len(read_data['files'])]
     OF1 = open(os.path.join(WORK_DIR, out_file1), 'w')
     if file2:
         OF2 = open(os.path.join(WORK_DIR, out_file2), 'w')
-
+    output_read_data['problem_reads']=[]
     reads_written = 0
     bases_written = 0
+    record1 = ''
+    record2 = ''
+    problem = False
     for i, line1 in enumerate(F1):
-        OF1.write(line1)
+        record1 += line1
         if file2:
             line2 = F2.readline()
-            OF2.write(line2)
-        if i % 4 == 1:
-            bases_written += len(line1) - 1
+            record2 += line2
+        record_index = i % 4
+        if record_index == 0:
+            read1_id = line1.rstrip()
             if file2:
-                bases_written += len(line2) - 1
-        elif i % 4 == 3:
-            reads_written += 1
-            if max_bases and bases_written >= max_bases:
-                break
+                read2_id = line2.rstrip()
+        if record_index == 1:
+            read1_length = len(line1) - 1
+            if file2:
+                read2_length = len(line2) - 1
+        elif record_index == 3:
+            qual1_length = len(line1) - 1
+            if file2:
+                qual2_length = len(line2) - 1
+            if read1_length != qual1_length:
+                problem = True
+                if len(output_read_data['problem_reads']) < 50:
+                    output_read_data['problem_reads'].append("Read {} from {}: read length = {}, qual length = {}".format(read1_id, file1, read1_length, qual1_length))
+            if file2 and read2_length != qual2_length:
+                problem = True
+                if len(output_read_data['problem_reads']) < 50:
+                    output_read_data['problem_reads'].append("Read {} from {}: read length = {}, qual length = {}".format(read2_id, file2, read2_length, qual2_length))
+
+            if not problem:
+                OF1.write(record1)
+                bases_written += read1_length
+                if file2:
+                    OF2.write(record2)
+                    bases_written += read2_length
+                reads_written += 1
+                if max_bases and bases_written >= max_bases:
+                    break
+            record1 = ''
+            record2 = ''
+            problem = False
 
     OF1.close()
     if file2:
         OF2.close()
 
-    truncated_read_data['num_reads'] = reads_written
-    truncated_read_data['num_bases'] = bases_written
+    output_read_data['num_reads'] = reads_written
+    output_read_data['num_bases'] = bases_written
     avgReadLength = bases_written/reads_written
     if file2:
         avgReadLength /= 2 # paired reads
-    truncated_read_data['avg_len'] = avgReadLength
+    output_read_data['avg_len'] = avgReadLength
 
-    LOG.write("duration of subsample_reads was %d seconds\n"%(time() - func_start))
-    return truncated_read_data
+    LOG.write("duration of rewrite_reads was %d seconds\n"%(time() - func_start))
+    return output_read_data
 
 def inferPlatform(read_id, maxReadLength):
     """ 
@@ -499,7 +541,6 @@ def trimGalore(details, threads=1):
         details["version"]['trim_galore'] = trim_galore_version
     if "trim report" not in details:
         details["trim report"] = {}
-        details["trim report"]['trim program'] = trim_galore_version
     toRegister = {} # save trimmed reads to register after iterating dictionary to avoid error "dictionary changed size during iteration"
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'short' and not details['reads'][reads]['platform'] == 'fasta':
@@ -1376,37 +1417,26 @@ def runSpades(details, args):
 
     contigsFile = "contigs.fasta"
     if return_code and not os.path.exists(contigsFile):
-        comment = "spades return code = %d, attempt re-running with controlled k-mer"%return_code
+        comment = "spades return code = %d, attempt re-running without error correction"%return_code
         LOG.write(comment+"\n")
         if 'problem' not in details['assembly']:
             details['assembly']['problem'] = []
         details['assembly']['problem'].append(comment)
-        #construct list of kmer-lengths to try assembling at, omitting the highest one (that may have caused failure)
-        kdirs = glob.glob("K*")
-        if len(kdirs) > 1:
-            knums=[]
-            for kdir in kdirs:
-                m = re.match("K(\d+)$", kdir)
-                if m:
-                    k = int(m.group(1))
-                    knums.append(k)
-            knums = sorted(knums) 
-            kstr = str(knums[0])
-            for k in knums[1:-1]:
-                kstr += ","+str(k)
-                next_to_last_k = k
 
-            command = ["spades.py", "--threads", str(args.threads), "-o", "."]
-            if args.memory:
-                command.extend(["-m", str(args.memory)])
-            command.extend(("--restart-from", "k%d"%next_to_last_k, "-k", kstr)) 
-            comment = "restart: SPAdes command = "+" ".join(command)+"\n"
-            LOG.write(comment+"\n")
-            details['assembly']['problem'].append(comment)
+        #first run trimming unless it has already been run
+        if not args.trim:
+            trimGalore(details, threads=args.threads)
+        yamlFile = writeSpadesYamlFile(details)
+        command.append("--only-assembler")
 
-            with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-                return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
-            LOG.write("return code = %d\n"%return_code)
+        comment = "rerun SPAdes: command = "+" ".join(command)+"\n"
+        LOG.write(comment+"\n")
+        #details['assembly']['problem'].append(comment)
+        details['assembly']['command_line'] = " ".join(command)
+
+        with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+            return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+        LOG.write("return code = %d\n"%return_code)
 
     spadesEndTime = time()
     elapsedTime = spadesEndTime - spadesStartTime
@@ -2118,6 +2148,7 @@ def main():
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
     parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
+    #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
     parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
     parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
@@ -2293,6 +2324,8 @@ def main():
                     continue # may have been superceded by trimmed version of those reads
                 if details['reads'][readFastq]['length_class'] == 'short':
                     for iteration in range(0, args.pilon_iterations):
+                        LOG.write("runPilon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
+                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
                         if pilonContigFile is not None:
                             contigs = pilonContigFile
                         else:
