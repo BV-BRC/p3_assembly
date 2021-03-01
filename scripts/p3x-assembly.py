@@ -107,7 +107,7 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         read_struct['files'].append(file1)
         #read_struct["path"].append(reads)
     read_struct = study_reads(read_struct)
-    if read_struct["platform"] == 'fasta':
+    if False and read_struct["platform"] == 'fasta':
         comment = "sequences are FASTA, cannot process"
         LOG.write(comment)
         sys.stdout.write(comment)
@@ -782,6 +782,10 @@ def categorize_anonymous_read_files(args, details):
             args.pacbio.append(item)
         elif read_file_type[item] == "nanopore":
             args.nanopore.append(item)
+        elif read_file_type[item] == "fasta":
+            if not hasattr(args, 'fasta'):
+                setattr(args, 'fasta', [])
+            args.fasta.append(item)
         else:
             comment = "Cannot decide read type for item "+item
             LOG.write(comment+"\n")
@@ -996,6 +1000,8 @@ def writeSpadesYamlFile(details):
         shortReadItems.extend(details['platform']['illumina'])
     if 'iontorrent' in details['platform']:
         shortReadItems.extend(details['platform']['iontorrent'])
+    if 'fasta' in details['platform']:
+        shortReadItems.extend(details['platform']['fasta'])
     for item in shortReadItems:
         LOG.write("process item {}\n".format(item))
         if ":" in item:
@@ -1072,14 +1078,14 @@ def writeSpadesYamlFile(details):
         OUT.write("\",\n        \"".join(nanopore_reads))
         OUT.write("\"\n    ]\n  }\n")
         precedingElement = True
-    if details['platform']['fasta']:
+    if False and details['platform']['fasta']:
         fasta_reads = []
         for item in details['platform']['fasta']:
             f = details['reads'][item]['files'][0]
             fasta_reads.append(f)
         if precedingElement:
             OUT.write(",\n")
-        OUT.write("  {\n    type: \"untrusted-contigs\",\n    single reads: [\n        \"")
+        OUT.write("  {\n    type: \"single\",\n    single reads: [\n        \"")
         OUT.write("\",\n        \"".join(fasta_reads))
         OUT.write("\"\n    ]\n  }\n")
         precedingElement = True
@@ -1392,6 +1398,8 @@ def runSpades(details, args):
         command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
         command.extend(["--untrusted-contigs", args.untrusted_contigs])
+    if args.fasta:
+        command.append("--only-assembler")
     if args.memory:
         command.extend(["-m", str(args.memory)])
     if args.recipe == "meta-spades":
@@ -2040,7 +2048,7 @@ def write_html_report(htmlFile, details):
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
 
-    if 'polishing' in details:
+    if 'polishing' in details and len(details['polishing']):
         HTML.write('<section>\n<h2>Polishing</h2>\n')
         HTML.write("""
         <table class="med-table kv-table">
@@ -2271,10 +2279,15 @@ def main():
         #now must decide which assembler to use
         if True:
             # original rule: if any illumina or iontorrent reads present, use Unicycler (long-reads can be present), else use canu for long-reads
-            if details['platform']['illumina'] + details['platform']['iontorrent']:
+            if details['platform']['fasta']:
+                args.recipe = "spades"
+                LOG.write("auto recipe using spades due to presence of fasta data")
+            elif details['platform']['illumina'] + details['platform']['iontorrent']:
                 args.recipe = "unicycler"
+                LOG.write("auto recipe using unicycler due to presence of short fastq data")
             else:
                 args.recipe = "canu"
+                LOG.write("auto recipe using canu due to absence of short fastq data")
         else:
             # alternative rule: if any long reads present, use canu
             if details['platform']['pacbio'] + details['platform']['nanopore']:
@@ -2322,6 +2335,8 @@ def main():
             for readFastq in details['reads']:
                 if 'superceded_by' in details['reads'][readFastq]:
                     continue # may have been superceded by trimmed version of those reads
+                if readFastq in args.fasta:
+                    continue # do not run pilon on fasta reads
                 if details['reads'][readFastq]['length_class'] == 'short':
                     for iteration in range(0, args.pilon_iterations):
                         LOG.write("runPilon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
