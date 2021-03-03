@@ -1398,12 +1398,14 @@ def runSpades(details, args):
         command.extend(["--trusted-contigs", args.trusted_contigs])
     if args.untrusted_contigs:
         command.extend(["--untrusted-contigs", args.untrusted_contigs])
-    if args.fasta:
+    if hasattr(args, 'fasta') and args.fasta:
         command.append("--only-assembler")
     if args.memory:
         command.extend(["-m", str(args.memory)])
     if args.recipe == "meta-spades":
         command.append("--meta")
+    if args.recipe == "rna-spades":
+        command.append("--rna")
         #
         # Validate arguments for metagenomic spades. It can only run with
         # a single paired-end library.
@@ -2154,7 +2156,7 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--max_bases', type=int, default=10000000000, help='process at most this many bases per read file or pair')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'auto'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
