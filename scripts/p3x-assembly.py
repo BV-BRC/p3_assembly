@@ -1635,7 +1635,10 @@ def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
     if return_code != 0:
         return None
 
-    command = ["bowtie2", "-p", str(threads), "-x", contigFile]
+    command = ["bowtie2", "-p", str(threads)]
+    if details['reads'][shortReadFastq]['platform'] == 'fasta':
+        command.append("-f")
+    command.extend(["-x", contigFile])
     fastqBase=''
     if ":" in shortReadFastq:
         read1, read2 = shortReadFastq.split(":")
@@ -2323,7 +2326,7 @@ def main():
         if args.racon_iterations:
             # now run racon with each long-read file
             for longReadFile in details['reads']:
-                if details['reads'][readFastq]['platform'] == 'fasta':
+                if details['reads'][longReadFile]['platform'] == 'fasta':
                     continue # do not run racon on fasta reads
                 if details['reads'][longReadFile]['length_class'] == 'long':
                     for i in range(0, args.racon_iterations):
