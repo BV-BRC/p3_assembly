@@ -2323,6 +2323,8 @@ def main():
         if args.racon_iterations:
             # now run racon with each long-read file
             for longReadFile in details['reads']:
+                if details['reads'][readFastq]['platform'] == 'fasta':
+                    continue # do not run racon on fasta reads
                 if details['reads'][longReadFile]['length_class'] == 'long':
                     for i in range(0, args.racon_iterations):
                         LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
@@ -2337,7 +2339,7 @@ def main():
             for readFastq in details['reads']:
                 if 'superceded_by' in details['reads'][readFastq]:
                     continue # may have been superceded by trimmed version of those reads
-                if readFastq in args.fasta:
+                if details['reads'][readFastq]['platform'] == 'fasta':
                     continue # do not run pilon on fasta reads
                 if details['reads'][readFastq]['length_class'] == 'short':
                     for iteration in range(0, args.pilon_iterations):
