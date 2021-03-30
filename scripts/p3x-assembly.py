@@ -1635,7 +1635,10 @@ def runBowtie(contigFile, shortReadFastq, details, threads=1, outformat='bam'):
     if return_code != 0:
         return None
 
-    command = ["bowtie2", "-p", str(threads), "-x", contigFile]
+    command = ["bowtie2", "-p", str(threads)]
+    if details['reads'][shortReadFastq]['platform'] == 'fasta':
+        command.append("-f")
+    command.extend(["-x", contigFile])
     fastqBase=''
     if ":" in shortReadFastq:
         read1, read2 = shortReadFastq.split(":")
