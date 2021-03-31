@@ -349,7 +349,11 @@ def studyFastaReads(read_data):
     maxReadLength = 0
     #minReadLength = 1e6
     readNumber = 0
-    F = open(read_data['files'][0])
+    file1 = read_data['files'][0]
+    if file1.endswith("gz"):
+        F = gzip.open(os.path.join(WORK_DIR, file1))
+    else:
+        F = open(os.path.join(WORK_DIR, file1))
     for line in F:
         if line.startswith(">"):
             readNumber += 1
