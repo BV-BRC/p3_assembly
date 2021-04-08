@@ -632,7 +632,13 @@ def sampleReads(filename, details=None):
                 seq = ""
             else:
                 seq += line.rstrip()
-    max_read_length = max(readLengths)
+    max_read_length = 0
+    if len(readLengths) > 0:
+        max_read_length = max(readLengths)
+    else:
+        comment = "in sampleReads for %s: text sample (length %d) did not contain any sequences to determine length from."%(filename, len(text))
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
     if len(read_id_sample) > 1:
         read_id_sample = read_id_sample[:-1] # last entry might be truncated, avoid it
     LOG.write("read type %s, maximum read length %.1f\n"%(read_format, max_read_length))
