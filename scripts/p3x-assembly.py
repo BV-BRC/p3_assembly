@@ -2324,6 +2324,8 @@ def main():
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     elif "spades" in args.recipe or args.recipe == "single-cell":
         if args.recipe == "meta-spades" and (args.pilon_iterations or args.racon_iterations):
+            args.pilon_iterations = 0
+            args.racon_iterations = 0
             comment = "Because recipe is meta-spaces, turning pilon and racon iterations off."
             LOG.write(comment+"\n")
             details['problem'].append(comment)
