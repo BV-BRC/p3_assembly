@@ -12,11 +12,11 @@ try:
     import urllib.request as urllib2 # python3
 except ImportError:
     import urllib2 #python2
-from time import time, localtime, strftime, sleep
+from time import time, localtime, strftime
 import json
-#import sra_tools
 import glob
-import pdb
+#import sra_tools
+#import pdb
 
 """
 This script organizes a command line for either 
@@ -427,7 +427,7 @@ def rewrite_reads(read_data, max_bases=0):
 
     output_read_data['files']=[out_file1]
     if file2:
-            output_read_data['files'].append(out_file2)
+        output_read_data['files'].append(out_file2)
 
     output_read_data['files'] = (out_file1, out_file2)[:len(read_data['files'])]
     OF1 = open(os.path.join(WORK_DIR, out_file1), 'w')
@@ -632,7 +632,13 @@ def sampleReads(filename, details=None):
                 seq = ""
             else:
                 seq += line.rstrip()
-    max_read_length = max(readLengths)
+    max_read_length = 0
+    if len(readLengths) > 0:
+        max_read_length = max(readLengths)
+    else:
+        comment = "in sampleReads for %s: text sample (length %d) did not contain any sequences to determine length from."%(filename, len(text))
+        LOG.write(comment+"\n")
+        details["problem"].append(comment)
     if len(read_id_sample) > 1:
         read_id_sample = read_id_sample[:-1] # last entry might be truncated, avoid it
     LOG.write("read type %s, maximum read length %.1f\n"%(read_format, max_read_length))
@@ -644,6 +650,7 @@ def findSingleDifference(s1, s2):
         return None
     start = None
     end = None
+    i = 0
     for i, (c1, c2) in enumerate(zip(s1, s2)):
         if c1 != c2:
             if end:
@@ -651,7 +658,7 @@ def findSingleDifference(s1, s2):
             if not start:
                 start = i
         elif start and not end:
-           end = i
+            end = i
     if start and not end:
         end = i+1
     return (start, end)
@@ -661,10 +668,9 @@ def categorize_anonymous_read_files(args, details):
     LOG.write("  files=%s\n"%("\t".join(args.anonymous_reads)))
 
     nonSraFiles = []
-    sraFiles = {}
     # first pull out any SRA files for special treatment
     for item in args.anonymous_reads:
-        m = re.match("([SED]RR\d+)", item)
+        m = re.match(r"([SED]RR\d+)", item)
         if m:
             sra = m.group(1)
             if sra not in args.sra:
@@ -1178,7 +1184,6 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         contigId = ">"+prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
                         contigIndex += 1
-                        contigCoverage = 0
                         short_read_coverage = 0
                         long_read_coverage = 0
                         passes_coverage_threshold = not (report['short read coverage available'] and report['long read coverage available'])
@@ -1271,7 +1276,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
     version_text = proc.stdout.read().decode()
     if version_text:
-        m = re.search("Unicycler\s+\S+", version_text, flags=re.IGNORECASE)
+        m = re.search(r"Unicycler\s+\S+", version_text, flags=re.IGNORECASE)
         if m:
             version_text = m.group(0) # entire match
     proc.wait()
@@ -1610,7 +1615,6 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     raconContigs = contigFile.replace(".fasta", ".racon.fasta")
     raconOut = open(raconContigs, 'w')
     command = ["racon", "-t", str(threads), "-u", longReadsFastq, readsToContigsSam, contigFile]
-    tempTime = time()
     LOG.write("racon command: \n"+' '.join(command)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
@@ -2065,8 +2069,8 @@ def write_html_report(htmlFile, details):
             <tr> <th colspan="2"> Polishing Rounds </th></tr></thead>
             <tbody>
             """)
-        for round, info in enumerate(details['polishing']):
-            HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", round+1))
+        for iteration, info in enumerate(details['polishing']):
+            HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", iteration+1))
             for key in sorted(info):
                 HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(info[key])))
             HTML.write("<tr></tr>\n") # blank row
@@ -2319,6 +2323,12 @@ def main():
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
     elif "spades" in args.recipe or args.recipe == "single-cell":
+        if args.recipe == "meta-spades" and (args.pilon_iterations or args.racon_iterations):
+            args.pilon_iterations = 0
+            args.racon_iterations = 0
+            comment = "Because recipe is meta-spaces, turning pilon and racon iterations off."
+            LOG.write(comment+"\n")
+            details['problem'].append(comment)
         contigs = runSpades(details, args)
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
@@ -2333,13 +2343,18 @@ def main():
                 if details['reads'][longReadFile]['platform'] == 'fasta':
                     continue # do not run racon on fasta reads
                 if details['reads'][longReadFile]['length_class'] == 'long':
-                    for i in range(0, args.racon_iterations):
-                        LOG.write("runRacon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
-                        raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
-                        if raconContigFile is not None:
-                            contigs = raconContigFile
-                        else:
-                            break # break out of iterating racon_iterations, go to next long-read file if any
+                    try:
+                        for i in range(0, args.racon_iterations):
+                            LOG.write("runRacon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, longReadFile, i, args.threads))
+                            raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
+                            if raconContigFile is not None:
+                                contigs = raconContigFile
+                            else:
+                                break # break out of iterating racon_iterations, go to next long-read file if any
+                    except Exception as e:
+                        comment = "runPilon failed with exception {}".format(e)
+                        LOG.write(comment)
+                        sys.stderr.write(comment)
             
         if args.pilon_iterations and args.pilon_jar:
             # now run pilon with each short-read file
@@ -2349,16 +2364,21 @@ def main():
                 if details['reads'][readFastq]['platform'] == 'fasta':
                     continue # do not run pilon on fasta reads
                 if details['reads'][readFastq]['length_class'] == 'short':
-                    for iteration in range(0, args.pilon_iterations):
-                        LOG.write("runPilon(%s, %s, details, threads=%d)\n"%(contigs, longReadFile, args.threads))
-                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
-                        if pilonContigFile is not None:
-                            contigs = pilonContigFile
-                        else:
-                            break
+                    try:
+                        for iteration in range(0, args.pilon_iterations):
+                            LOG.write("runPilon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, readFastq, iteration, args.threads))
+                            pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
+                            if pilonContigFile is not None:
+                                contigs = pilonContigFile
+                            else:
+                                break
                         # check number of changes in most recent round, quit if zero
                         if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
                             break
+                    except Exception as e:
+                        comment = "runPilon failed with exception {}".format(e)
+                        LOG.write(comment)
+                        sys.stderr.write(comment)
             
     if contigs and os.path.getsize(contigs):
         filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
