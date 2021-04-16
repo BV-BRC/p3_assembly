@@ -85,9 +85,15 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         dir2, file2 = os.path.split(read2)
         if os.path.abspath(dir1) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read1, os.path.join(WORK_DIR,file1)))
+            if os.path.exists(os.path.join(WORK_DIR,file1)):
+                LOG.write("first deleting file {}\n".format(os.path.join(WORK_DIR,file1)))
+                os.remove(os.path.join(WORK_DIR,file1))
             os.symlink(os.path.abspath(read1), os.path.join(WORK_DIR,file1))
         if os.path.abspath(dir2) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WORK_DIR,file2)))
+            if os.path.exists(os.path.join(WORK_DIR,file2)):
+                LOG.write("first deleting file {}\n".format(os.path.join(WORK_DIR,file2)))
+                os.remove(os.path.join(WORK_DIR,file2))
             os.symlink(os.path.abspath(read2), os.path.join(WORK_DIR,file2))
         read_struct['files'].append(file1)
         read_struct['files'].append(file2)
@@ -246,6 +252,8 @@ def study_reads(read_data):
     maxQualScore = chr(0)
     minQualScore = chr(255)
     readNumber = 0
+    read_id_1 = None
+    read_id_2 = None
     for i, line1 in enumerate(F1):
         if file2:
             line2 = F2.readline()
@@ -261,7 +269,7 @@ def study_reads(read_data):
                 read_id_2 = line2.split(' ')[0] # get part up to first space, if any 
                 if not read_id_1 == read_id_2:
                     diff = findSingleDifference(read_id_1, read_id_2)
-                    if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
+                    if diff == None or sorted((read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]])) != ('1', '2'):
                         read_ids_paired = False
                         read_data["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
             if i % 4 == 1:
