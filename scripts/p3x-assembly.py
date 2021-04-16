@@ -1611,6 +1611,11 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
             version_text = proc.stdout.read().decode()
         details["version"]['racon'] = version_text.strip()
     readsToContigsSam = runMinimap(contigFile, longReadsFastq, details, threads, outformat='sam')
+    if not readsToContigsSam:
+        comment = "runMinimap failed to generate sam file, exiting runRacon"
+        LOG.write(comment + "\n")
+        details['problem'].append(comment)
+        return None
     raconStartTime = time()
     raconContigs = contigFile.replace(".fasta", ".racon.fasta")
     raconOut = open(raconContigs, 'w')
@@ -1627,6 +1632,11 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     details['polishing'].append({"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "output": raconContigs})
     comment = "racon, input %s, output %s"%(contigFile, raconContigs)
     LOG.write(comment+"\n")
+    if re.search("racon.racon.fasta", raconContigs):
+        shorterFileName = re.sub("racon.racon.fasta", "racon.fasta", raconContigs)
+        shutil.move(raconContigs, shorterFileName)
+        raconContigs = shorterFileName
+        LOG.write("renaming {} to {}\n".format(raconContigs, shorterFileName))
     #details["post-assembly transformation"].append(comment)
     return raconContigs
 
@@ -2352,7 +2362,7 @@ def main():
                             else:
                                 break # break out of iterating racon_iterations, go to next long-read file if any
                     except Exception as e:
-                        comment = "runPilon failed with exception {}".format(e)
+                        comment = "runRacon failed with exception {}".format(e)
                         LOG.write(comment)
                         sys.stderr.write(comment)
             
