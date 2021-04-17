@@ -2189,8 +2189,8 @@ def main():
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
-    parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
-    parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
+    parser.add_argument('--racon_iterations', type=int, default=0, help='number of times to run racon per long-read file', required=False)
+    parser.add_argument('--pilon_iterations', type=int, default=0, help='number of times to run pilon per short-read file', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
