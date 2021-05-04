@@ -85,9 +85,15 @@ def registerReads(reads, details, platform=None, interleaved=False, supercedes=N
         dir2, file2 = os.path.split(read2)
         if os.path.abspath(dir1) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read1, os.path.join(WORK_DIR,file1)))
+            if os.path.exists(os.path.join(WORK_DIR,file1)):
+                LOG.write("first deleting file {}\n".format(os.path.join(WORK_DIR,file1)))
+                os.remove(os.path.join(WORK_DIR,file1))
             os.symlink(os.path.abspath(read1), os.path.join(WORK_DIR,file1))
         if os.path.abspath(dir2) != WORK_DIR:
             LOG.write("symlinking %s to %s\n"%(read2, os.path.join(WORK_DIR,file2)))
+            if os.path.exists(os.path.join(WORK_DIR,file2)):
+                LOG.write("first deleting file {}\n".format(os.path.join(WORK_DIR,file2)))
+                os.remove(os.path.join(WORK_DIR,file2))
             os.symlink(os.path.abspath(read2), os.path.join(WORK_DIR,file2))
         read_struct['files'].append(file1)
         read_struct['files'].append(file2)
@@ -246,6 +252,8 @@ def study_reads(read_data):
     maxQualScore = chr(0)
     minQualScore = chr(255)
     readNumber = 0
+    read_id_1 = None
+    read_id_2 = None
     for i, line1 in enumerate(F1):
         if file2:
             line2 = F2.readline()
@@ -261,7 +269,7 @@ def study_reads(read_data):
                 read_id_2 = line2.split(' ')[0] # get part up to first space, if any 
                 if not read_id_1 == read_id_2:
                     diff = findSingleDifference(read_id_1, read_id_2)
-                    if diff == None or sorted(read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]]) != ('1', '2'):
+                    if diff == None or sorted((read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]])) != ('1', '2'):
                         read_ids_paired = False
                         read_data["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
             if i % 4 == 1:
@@ -1611,6 +1619,11 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
             version_text = proc.stdout.read().decode()
         details["version"]['racon'] = version_text.strip()
     readsToContigsSam = runMinimap(contigFile, longReadsFastq, details, threads, outformat='sam')
+    if not readsToContigsSam:
+        comment = "runMinimap failed to generate sam file, exiting runRacon"
+        LOG.write(comment + "\n")
+        details['problem'].append(comment)
+        return None
     raconStartTime = time()
     raconContigs = contigFile.replace(".fasta", ".racon.fasta")
     raconOut = open(raconContigs, 'w')
@@ -1627,6 +1640,11 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     details['polishing'].append({"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "output": raconContigs})
     comment = "racon, input %s, output %s"%(contigFile, raconContigs)
     LOG.write(comment+"\n")
+    if re.search("racon.racon.fasta", raconContigs):
+        shorterFileName = re.sub("racon.racon.fasta", "racon.fasta", raconContigs)
+        shutil.move(raconContigs, shorterFileName)
+        raconContigs = shorterFileName
+        LOG.write("renaming {} to {}\n".format(raconContigs, shorterFileName))
     #details["post-assembly transformation"].append(comment)
     return raconContigs
 
@@ -2171,8 +2189,8 @@ def main():
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
-    parser.add_argument('--racon_iterations', type=int, default=2, help='number of times to run racon per long-read file', required=False)
-    parser.add_argument('--pilon_iterations', type=int, default=2, help='number of times to run pilon per short-read file', required=False)
+    parser.add_argument('--racon_iterations', type=int, default=0, help='number of times to run racon per long-read file', required=False)
+    parser.add_argument('--pilon_iterations', type=int, default=0, help='number of times to run pilon per short-read file', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
@@ -2352,7 +2370,7 @@ def main():
                             else:
                                 break # break out of iterating racon_iterations, go to next long-read file if any
                     except Exception as e:
-                        comment = "runPilon failed with exception {}".format(e)
+                        comment = "runRacon failed with exception {}".format(e)
                         LOG.write(comment)
                         sys.stderr.write(comment)
             
