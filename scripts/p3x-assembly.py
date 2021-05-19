@@ -258,8 +258,6 @@ def study_reads(read_data):
         if file2:
             line2 = F2.readline()
             if not line2:
-                break # cannot process any more
-            if not line2:
                 comment = "Number of reads differs between {} and {} after {}".format(file1, file2, readNumber)
                 LOG.write(comment+"\n")
                 read_data["problem"].append(comment)
@@ -319,7 +317,9 @@ def study_reads(read_data):
     if file2:
         F2.close()
 
-    avgReadLength = totalReadLength/readNumber
+    avgReadLength = 0
+    if readNumber:
+        avgReadLength = totalReadLength/readNumber
     if file2:
         avgReadLength/=2
     read_data['avg_len'] = avgReadLength
