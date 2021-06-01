@@ -258,8 +258,6 @@ def study_reads(read_data):
         if file2:
             line2 = F2.readline()
             if not line2:
-                break # cannot process any more
-            if not line2:
                 comment = "Number of reads differs between {} and {} after {}".format(file1, file2, readNumber)
                 LOG.write(comment+"\n")
                 read_data["problem"].append(comment)
@@ -319,7 +317,9 @@ def study_reads(read_data):
     if file2:
         F2.close()
 
-    avgReadLength = totalReadLength/readNumber
+    avgReadLength = 0
+    if readNumber:
+        avgReadLength = totalReadLength/readNumber
     if file2:
         avgReadLength/=2
     read_data['avg_len'] = avgReadLength
@@ -678,7 +678,7 @@ def categorize_anonymous_read_files(args, details):
     nonSraFiles = []
     # first pull out any SRA files for special treatment
     for item in args.anonymous_reads:
-        m = re.match(r"([SED]RR\d+)", item)
+        m = re.match(r"^([SED]RR\d+)$", item)
         if m:
             sra = m.group(1)
             if sra not in args.sra:
@@ -1278,7 +1278,7 @@ def runBandage(gfaFile, details):
             details['problem'].append(comment)
     return retval
 
-def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
+def runUnicycler(details, threads=1, min_contig_length=0, prefix="", spades_exec=None):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("runUnicycler\n")
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
@@ -1296,6 +1296,8 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix=""):
         command.extend(("--min_fasta_length", str(min_contig_length)))
     command.extend(("--keep", "2")) # keep files needed for re-run if necessary
     command.append("--no_pilon")  # we will run our own, if requested
+    if spades_exec:
+        command.extend("--spades_path", spades_exec);
 
     # put all read files on command line, let Unicycler figure out which type each is
     # apparently unicycler can only accept one read set in each class (I tried multiple ways to submit 2 paired-end sets, failed)
@@ -2205,6 +2207,7 @@ def main():
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
     parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
+    parser.add_argument('--spades_for_unicycler', help='path to spades.py suitable for unicycler')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help='JSON file with additional information.')
     parser.add_argument('--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
@@ -2331,7 +2334,10 @@ def main():
         contigs = "input_contigs.fasta"
             
     elif args.recipe == "unicycler":
-        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix )
+        spades_exec = None
+        if (args.spades_for_unicycler):
+            spades_exec = args.spades_for_unicycler
+        contigs = runUnicycler(details, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix, spades_exec=spades_exec )
         if not contigs:
             comment = "unicycler failed to generate contigs, trying spades"
             LOG.write(comment+"\n")
