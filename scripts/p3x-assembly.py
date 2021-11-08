@@ -1191,6 +1191,10 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                     if seq:
                         contigId = ">"+prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
+                        if len(seq) < min_contig_length:
+                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
+                            num_bad_contigs += 1
+                            continue
                         contigIndex += 1
                         short_read_coverage = 0
                         long_read_coverage = 0
@@ -1566,19 +1570,14 @@ def convertSamToBam(samFile, details, threads=1):
         return None
 
     LOG.flush()
-    #os.remove(samFile) #save a little space
+    os.remove(samFile) #save a little space
 
     bamFileSorted = samFilePrefix+".bam" 
     command = ["samtools", "sort", "-@", str(sortThreads), "-o", bamFileSorted, samFilePrefix+"_unsorted.bam"]
+    if "Version: 0.1.19" in details["version"]["samtools"]:
+        # different invocation for this older version
+        command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
     return_code = subprocess.check_call(command, shell=False, stderr=LOG)
-
-    # this way to call samtools sort is for verion 0.1.19
-    #command = ["samtools", "sort", "-@", str(sortThreads), samFilePrefix+"_unsorted.bam", samFilePrefix]
-    #LOG.write("executing:\n"+' '.join(command)+"\n")
-    #with open(bamFileSorted, 'w') as OUT:
-    #    p = subprocess.Popen(command, shell=False, stdout=OUT)
-    #    return_code = p.wait()
-    #    OUT.close()
 
     if return_code != 0:
         comment = "samtools sort returned %d, convertSamToBam failed"%return_code
@@ -1718,8 +1717,15 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
         command.extend(('--frags', bamFile))
     else:
         command.extend(('--unpaired', bamFile))
-    pilonPrefix = contigFile.replace(".fasta", ".pilon")
-    command.extend(('--outdir', '.', '--output', pilonPrefix, '--changes'))
+    pilonPrefix = contigFile.replace(".fasta", "")
+    m = re.match(".*pilon_(\d+)", pilonPrefix)
+    if m :
+        level = int(m.group(1))
+        pilonPrefix = re.sub("pilon_"+m.group(1), "pilon_{}".format(level+1), pilonPrefix)
+    else:
+        pilonPrefix += "_pilon_1"
+    pilonContigs = pilonPrefix #+ ".fasta"
+    command.extend(('--outdir', '.', '--output', pilonContigs, '--changes'))
     command.extend(('--threads', str(threads)))
     tempTime = time()
     LOG.write("executing:\n"+" ".join(command)+"\n")
@@ -1729,15 +1735,14 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     LOG.write("pilon duration = %d\n"%(time() - tempTime))
     if return_code != 0:
         return None
-    pilonContigs = pilonPrefix+".fasta"
     pilon_changes = 0
-    with open(pilonContigs.replace(".fasta", ".changes")) as CHANGES:
+    with open(pilonContigs+".changes") as CHANGES:
         pilon_changes = len(CHANGES.read().splitlines())
     details['polishing'].append({"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes})
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
     #details["post-assembly transformation"].append(comment)
-    return pilonContigs 
+    return pilonContigs+".fasta" 
 
 def calcReadDepth(bamfiles, details):
     """ Return dict of contig_ids to tuple of (coverage, normalized_coverage) """
@@ -2193,6 +2198,7 @@ def main():
     
     parser.add_argument('--racon_iterations', type=int, default=0, help='number of times to run racon per long-read file', required=False)
     parser.add_argument('--pilon_iterations', type=int, default=0, help='number of times to run pilon per short-read file', required=False)
+    parser.add_argument('--pilon_hours', type=float, default=6.0, help='maximum hours to run pilon', required=False)
     #parser.add_argument('--singlecell', action = 'store_true', help='flag for single-cell MDA data for SPAdes', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
     parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
@@ -2381,8 +2387,12 @@ def main():
                         sys.stderr.write(comment)
             
         if args.pilon_iterations and args.pilon_jar:
+
+            pilon_end_time = time() + args.pilon_hours * 60 * 60
             # now run pilon with each short-read file
             for readFastq in details['reads']:
+                if time() > pilon_end_time:
+                    break
                 if 'superceded_by' in details['reads'][readFastq]:
                     continue # may have been superceded by trimmed version of those reads
                 if details['reads'][readFastq]['platform'] == 'fasta':
@@ -2390,6 +2400,10 @@ def main():
                 if details['reads'][readFastq]['length_class'] == 'short':
                     try:
                         for iteration in range(0, args.pilon_iterations):
+                            if time() > pilon_end_time:
+                                LOG.write("Time expended on pilon exceeds allocation of {} hours. Omitting further pilon runs.".format(args.pilon_hours))
+                                break
+
                             LOG.write("runPilon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, readFastq, iteration, args.threads))
                             pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
                             if pilonContigFile is not None:
