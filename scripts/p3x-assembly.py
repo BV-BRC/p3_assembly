@@ -1147,29 +1147,43 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
     """
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
     LOG.write("filterContigsByMinLength(%s) \n"%(inputContigs))
+    report = {}
     shortReadDepth = None
     longReadDepth = None
     bamFiles = []
+    totalShortReadBases = 0
+    totalLongReadBases = 0
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'short':
             bam = runBowtie(inputContigs, reads, details, threads=threads, outformat='bam')
             if bam:
                 bamFiles.append(bam)
+            if 'num_bases' in details['reads'][reads]:
+                totalShortReadBases += details['reads'][reads]['num_bases']
     if bamFiles:
         shortReadDepth = calcReadDepth(bamFiles, details)
+        if shortReadDepth and 'average_coverage' in shortReadDepth:
+            report['average depth (short reads)'] = shortReadDepth['average_coverage']
     bamFiles = []
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'long':
             bam = runMinimap(inputContigs, reads, details, threads=threads, outformat='bam')
             if bam:
                 bamFiles.append(bam)
+            if 'num_bases' in details['reads'][reads]:
+                totalLongReadBases += details['reads'][reads]['num_bases']
     if bamFiles:
         longReadDepth = calcReadDepth(bamFiles, details)
-    report = {}
+        if longReadDepth and 'average_coverage' in longReadDepth:
+            report['average depth (long reads)'] = longReadDepth['average_coverage']
     report['min_contig_length_threshold'] = "%d"%min_contig_length
     report["min_contig_coverage_threshold"] = "%.1f"%min_contig_coverage
-    report['short read coverage available'] = bool(shortReadDepth and len(shortReadDepth) )
-    report['long read coverage available'] = bool(longReadDepth and len(longReadDepth) )
+    if totalShortReadBases:
+        report['total_short_read_bases'] = totalShortReadBases
+        LOG.write("Total short read bases = %d\t"%totalShortReadBases)
+    if totalLongReadBases:
+        report['total_long_read_bases'] = totalLongReadBases
+        LOG.write("Total long read bases = %d\t"%totalLongReadBases)
     num_good_contigs = num_bad_contigs = 0
     suboptimalContigs = ""
     total_seq_length = 0
@@ -1364,6 +1378,7 @@ def runUnicycler(details, threads=1, min_contig_length=0, prefix="", spades_exec
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
 
     details["assembly"]['assembly_time'] = elapsedHumanReadable
+    details["assembly"]['assembly_seconds'] = elapsedTime
 
     LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
 
@@ -1609,7 +1624,7 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     Run racon on reads, read-to-contig-sam, contigs. Generate polished contigs.
     Return name of polished contigs.
     """
-    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
+    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time() - START_TIME))
     LOG.write('runRacon(%s, %s, details, %d)\n'%(contigFile, longReadsFastq, threads))
     if 'racon' not in details['version']:
         command = ["racon", "--version"]
@@ -1638,7 +1653,7 @@ def runRacon(contigFile, longReadsFastq, details, threads=1):
     raconContigSize = os.path.getsize(raconContigs)
     if raconContigSize < 10:
         return None
-    details['polishing'].append({"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "output": raconContigs})
+    details['polishing'].append({"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "output": raconContigs, "seconds": time()-raconStartTime})
     comment = "racon, input %s, output %s"%(contigFile, raconContigs)
     LOG.write(comment+"\n")
     if re.search("racon.racon.fasta", raconContigs):
@@ -1712,6 +1727,7 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     bamFile = runBowtie(contigFile, shortReadFastq, details, threads=threads, outformat='bam')
     if not bamFile:
         return None
+    pilon_start_time = time()
     command = ['java', '-Xmx32G', '-jar', pilon_jar, '--genome', contigFile]
     if ':' in shortReadFastq:
         command.extend(('--frags', bamFile))
@@ -1727,18 +1743,18 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     pilonContigs = pilonPrefix #+ ".fasta"
     command.extend(('--outdir', '.', '--output', pilonContigs, '--changes'))
     command.extend(('--threads', str(threads)))
-    tempTime = time()
     LOG.write("executing:\n"+" ".join(command)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("pilon return code = %d\n"%return_code)
-    LOG.write("pilon duration = %d\n"%(time() - tempTime))
+    pilon_time = time() - pilon_start_time
+    LOG.write("pilon duration = %d\n"%(pilon_time))
     if return_code != 0:
         return None
     pilon_changes = 0
     with open(pilonContigs+".changes") as CHANGES:
         pilon_changes = len(CHANGES.read().splitlines())
-    details['polishing'].append({"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes})
+    details['polishing'].append({"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes, "seconds" : pilon_time})
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
     #details["post-assembly transformation"].append(comment)
@@ -1803,10 +1819,11 @@ def calcReadDepth(bamfiles, details):
     totalMeanDepth = 0
     if totalLength > 0:
         totalMeanDepth = totalDepthSum/totalLength
+        readDepth['average_coverage'] = totalMeanDepth
 
     # calculate mean depth of contigs within "normal" boundary around overall mean
     lowerBound = totalMeanDepth * 0.5
-    upperBound = totalMeanDepth * 1.5
+    upperBound = totalMeanDepth * 2
     oneXSum = 0.0
     oneXLen = 0
     for c in readDepth:
@@ -2442,6 +2459,7 @@ def main():
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
     LOG.write("Total time in hours = %d\t"%((time() - START_TIME)/3600))
+    LOG.write("Total time in seconds = %d\t"%((time() - START_TIME)))
     LOG.close()
     return main_return_code
 
