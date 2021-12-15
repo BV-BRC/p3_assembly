@@ -2260,14 +2260,15 @@ def main():
     global DETAILS_DIR
     DETAILS_DIR = os.path.abspath(os.path.join(SAVE_DIR, "details"))
     os.mkdir(DETAILS_DIR)
-    logfileName = os.path.join(DETAILS_DIR, args.prefix + "p3_assembly.log")
+    #logfileName = os.path.join(DETAILS_DIR, args.prefix + "p3_assembly.log")
  
     if args.path_prefix:
         os.environ["PATH"] = ":".join(args.path_prefix) + ":" + os.environ["PATH"]
 
     global LOG 
     sys.stderr.write("logging to "+logfileName+"\n")
-    LOG = open(logfileName, 'w') 
+    #LOG = open(logfileName, 'w') 
+    LOG = sys.stderr
     LOG.write("starting %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(START_TIME))+"\n")
     LOG.write("args= "+str(args)+"\n\n")
