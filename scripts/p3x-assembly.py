@@ -2266,7 +2266,7 @@ def main():
         os.environ["PATH"] = ":".join(args.path_prefix) + ":" + os.environ["PATH"]
 
     global LOG 
-    sys.stderr.write("logging to "+logfileName+"\n")
+    #sys.stderr.write("logging to "+logfileName+"\n")
     #LOG = open(logfileName, 'w') 
     LOG = sys.stderr
     LOG.write("starting %s\n"%sys.argv[0])
