@@ -2275,7 +2275,7 @@ def main():
     LOG.write("Work directory is "+WORK_DIR+"\n\n")
     LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
     LOG.write("Detailed output will be saved to "+DETAILS_DIR+"\n\n")
-    details = { 'logfile' : logfileName, 'assembly': {} }
+    details = {'assembly': {} }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
     details["original_items"] = []
