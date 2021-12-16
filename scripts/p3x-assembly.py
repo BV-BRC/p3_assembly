@@ -2266,7 +2266,7 @@ def main():
         os.environ["PATH"] = ":".join(args.path_prefix) + ":" + os.environ["PATH"]
 
     global LOG 
-    sys.stderr.write("logging to "+logfileName+"\n")
+    #sys.stderr.write("logging to "+logfileName+"\n")
     #LOG = open(logfileName, 'w') 
     LOG = sys.stderr
     LOG.write("starting %s\n"%sys.argv[0])
@@ -2275,7 +2275,7 @@ def main():
     LOG.write("Work directory is "+WORK_DIR+"\n\n")
     LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
     LOG.write("Detailed output will be saved to "+DETAILS_DIR+"\n\n")
-    details = { 'logfile' : logfileName, 'assembly': {} }
+    details = {'assembly': {} }
     details["pre-assembly transformation"] = []
     details["post-assembly transformation"] = []
     details["original_items"] = []
