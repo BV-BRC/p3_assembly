@@ -1161,9 +1161,8 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             if 'num_bases' in details['reads'][reads]:
                 totalShortReadBases += details['reads'][reads]['num_bases']
     if bamFiles:
-        shortReadDepth = calcReadDepth(bamFiles, details)
-        if shortReadDepth and 'average_coverage' in shortReadDepth:
-            report['average depth (short reads)'] = shortReadDepth['average_coverage']
+        (average_depth, shortReadDepth) = calcReadDepth(bamFiles, details)
+        report['average depth (short reads)'] = average_depth
     bamFiles = []
     for reads in details['reads']:
         if details['reads'][reads]['length_class'] == 'long':
@@ -1173,9 +1172,8 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
             if 'num_bases' in details['reads'][reads]:
                 totalLongReadBases += details['reads'][reads]['num_bases']
     if bamFiles:
-        longReadDepth = calcReadDepth(bamFiles, details)
-        if longReadDepth and 'average_coverage' in longReadDepth:
-            report['average depth (long reads)'] = longReadDepth['average_coverage']
+        (average_depth, longReadDepth) = calcReadDepth(bamFiles, details)
+        report['average depth (long reads)'] = average_depth
     report['min_contig_length_threshold'] = "%d"%min_contig_length
     report["min_contig_coverage_threshold"] = "%.1f"%min_contig_coverage
     if totalShortReadBases:
@@ -1212,7 +1210,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         contigIndex += 1
                         short_read_coverage = 0
                         long_read_coverage = 0
-                        passes_coverage_threshold = not (report['short read coverage available'] and report['long read coverage available'])
+                        passes_coverage_threshold = False
                         if shortReadDepth and seqId in shortReadDepth:
                             short_read_coverage, normalizedDepth = shortReadDepth[seqId]
                             contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
@@ -1220,7 +1218,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                            passes_coverage_threshold = long_read_coverage >= min_contig_coverage
+                            passes_coverage_threshold = passes_coverage_threshold | long_read_coverage >= min_contig_coverage
                         if passes_coverage_threshold:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
@@ -1819,7 +1817,6 @@ def calcReadDepth(bamfiles, details):
     totalMeanDepth = 0
     if totalLength > 0:
         totalMeanDepth = totalDepthSum/totalLength
-        readDepth['average_coverage'] = totalMeanDepth
 
     # calculate mean depth of contigs within "normal" boundary around overall mean
     lowerBound = totalMeanDepth * 0.5
@@ -1827,6 +1824,8 @@ def calcReadDepth(bamfiles, details):
     oneXSum = 0.0
     oneXLen = 0
     for c in readDepth:
+        if c == 'average_coverage':
+            continue
         meanDepth = readDepth[c][0]
         if meanDepth >= lowerBound and meanDepth <= upperBound:
             oneXSum += meanDepth * contigLength[c]
@@ -1836,10 +1835,12 @@ def calcReadDepth(bamfiles, details):
         oneXDepth = oneXSum/oneXLen # length-weighted average
 
     for c in readDepth:
+        if c == 'average_coverage':
+            continue
         meanDepth = readDepth[c][0]
         normalizedDepth = meanDepth / oneXDepth
         readDepth[c][1] = normalizedDepth
-    return readDepth
+    return (totalMeanDepth, readDepth)
 
 def runCanu(details, canu_exec="canu", threads=1, genome_size="5m", memory=250, prefix=""):
     LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
