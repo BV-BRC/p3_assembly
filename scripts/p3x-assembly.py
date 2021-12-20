@@ -1218,7 +1218,7 @@ def filterContigsByMinLength(inputContigs, details, min_contig_length=300, min_c
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                            passes_coverage_threshold = passes_coverage_threshold | long_read_coverage >= min_contig_coverage
+                            passes_coverage_threshold |= long_read_coverage >= min_contig_coverage
                         if passes_coverage_threshold:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
