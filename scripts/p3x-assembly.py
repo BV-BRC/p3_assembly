@@ -2382,60 +2382,65 @@ def main():
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
-    if contigs and os.path.getsize(contigs):
-        if not args.contigs:
-            main_return_code = 0
-        LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
-        if args.racon_iterations:
-            # now run racon with each long-read file
-            for longReadFile in details['reads']:
-                if details['reads'][longReadFile]['platform'] == 'fasta':
-                    continue # do not run racon on fasta reads
-                if details['reads'][longReadFile]['length_class'] == 'long':
-                    try:
-                        for i in range(0, args.racon_iterations):
-                            LOG.write("runRacon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, longReadFile, i, args.threads))
-                            raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
-                            if raconContigFile is not None:
-                                contigs = raconContigFile
-                            else:
-                                break # break out of iterating racon_iterations, go to next long-read file if any
-                    except Exception as e:
-                        comment = "runRacon failed with exception {}".format(e)
-                        LOG.write(comment)
-                        sys.stderr.write(comment)
-            
-        if args.pilon_iterations and args.pilon_jar:
+    if not contigs:
+        LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
+        LOG.write("Total time in hours = %d\t"%((time() - START_TIME)/3600))
+        LOG.write("Total time in seconds = %d\t"%((time() - START_TIME)))
+        LOG.write("contigs file not generated. Failing.\n")
+        return 1
+    if not args.contigs:
+        main_return_code = 0
+    LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+    if args.racon_iterations:
+        # now run racon with each long-read file
+        for longReadFile in details['reads']:
+            if details['reads'][longReadFile]['platform'] == 'fasta':
+                continue # do not run racon on fasta reads
+            if details['reads'][longReadFile]['length_class'] == 'long':
+                try:
+                    for i in range(0, args.racon_iterations):
+                        LOG.write("runRacon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, longReadFile, i, args.threads))
+                        raconContigFile = runRacon(contigs, longReadFile, details, threads=args.threads)
+                        if raconContigFile is not None:
+                            contigs = raconContigFile
+                        else:
+                            break # break out of iterating racon_iterations, go to next long-read file if any
+                except Exception as e:
+                    comment = "runRacon failed with exception {}".format(e)
+                    LOG.write(comment)
+                    sys.stderr.write(comment)
+        
+    if args.pilon_iterations and args.pilon_jar:
 
-            pilon_end_time = time() + args.pilon_hours * 60 * 60
-            # now run pilon with each short-read file
-            for readFastq in details['reads']:
-                if time() > pilon_end_time:
-                    break
-                if 'superceded_by' in details['reads'][readFastq]:
-                    continue # may have been superceded by trimmed version of those reads
-                if details['reads'][readFastq]['platform'] == 'fasta':
-                    continue # do not run pilon on fasta reads
-                if details['reads'][readFastq]['length_class'] == 'short':
-                    try:
-                        for iteration in range(0, args.pilon_iterations):
-                            if time() > pilon_end_time:
-                                LOG.write("Time expended on pilon exceeds allocation of {} hours. Omitting further pilon runs.".format(args.pilon_hours))
-                                break
-
-                            LOG.write("runPilon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, readFastq, iteration, args.threads))
-                            pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
-                            if pilonContigFile is not None:
-                                contigs = pilonContigFile
-                            else:
-                                break
-                        # check number of changes in most recent round, quit if zero
-                        if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+        pilon_end_time = time() + args.pilon_hours * 60 * 60
+        # now run pilon with each short-read file
+        for readFastq in details['reads']:
+            if time() > pilon_end_time:
+                break
+            if 'superceded_by' in details['reads'][readFastq]:
+                continue # may have been superceded by trimmed version of those reads
+            if details['reads'][readFastq]['platform'] == 'fasta':
+                continue # do not run pilon on fasta reads
+            if details['reads'][readFastq]['length_class'] == 'short':
+                try:
+                    for iteration in range(0, args.pilon_iterations):
+                        if time() > pilon_end_time:
+                            LOG.write("Time expended on pilon exceeds allocation of {} hours. Omitting further pilon runs.".format(args.pilon_hours))
                             break
-                    except Exception as e:
-                        comment = "runPilon failed with exception {}".format(e)
-                        LOG.write(comment)
-                        sys.stderr.write(comment)
+
+                        LOG.write("runPilon(%s, %s, round=%d, details, threads=%d)\n"%(contigs, readFastq, iteration, args.threads))
+                        pilonContigFile = runPilon(contigs, readFastq, details, args.pilon_jar, args.threads)
+                        if pilonContigFile is not None:
+                            contigs = pilonContigFile
+                        else:
+                            break
+                    # check number of changes in most recent round, quit if zero
+                    if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+                        break
+                except Exception as e:
+                    comment = "runPilon failed with exception {}".format(e)
+                    LOG.write(comment)
+                    sys.stderr.write(comment)
             
     if contigs and os.path.getsize(contigs):
         filteredContigs = filterContigsByMinLength(contigs, details, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
