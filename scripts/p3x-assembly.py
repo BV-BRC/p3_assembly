@@ -2261,7 +2261,7 @@ def main():
         parseJsonParameters(args)
     baseName = args.outputDirectory #"p3_assembly" 
     if args.prefix:
-        args.prefix = args.prefix.replace(" ", "_")
+        args.prefix = re.sub("[^\w\d\-_.]", "_", args.prefix)
         if not args.prefix.endswith("_"):
             args.prefix += "_"
     global WORK_DIR
