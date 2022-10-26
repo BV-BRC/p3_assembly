@@ -1128,10 +1128,10 @@ def runQuast(contigsFile, args, details):
         shutil.move(os.path.join(quastDir, "report.html"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.html"))
         shutil.move(os.path.join(quastDir, "report.tsv"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.tsv"))
         shutil.move(os.path.join(quastDir, "report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_report.txt"))
-        shutil.move(os.path.join(quastDir, "transposed_report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.txt"))
-        shutil.move(os.path.join(quastDir, "transposed_report.tsv"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.tsv"))
-        details["quast_transposed_txt"] = "details/"+args.prefix+"quast_transposed_report.txt"
-        details["quast_transposed_tsv"] = "details/"+args.prefix+"quast_transposed_report.tsv"
+        #shutil.move(os.path.join(quastDir, "transposed_report.txt"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.txt"))
+        #shutil.move(os.path.join(quastDir, "transposed_report.tsv"), os.path.join(DETAILS_DIR, args.prefix+"quast_transposed_report.tsv"))
+        #details["quast_transposed_txt"] = "details/"+args.prefix+"quast_transposed_report.txt"
+        #details["quast_transposed_tsv"] = "details/"+args.prefix+"quast_transposed_report.tsv"
         details["quast_txt"] = "details/"+args.prefix+"quast_report.txt"
         details["quast_tsv"] = "details/"+args.prefix+"quast_report.tsv"
         details["quast_html"] = "details/"+args.prefix+"quast_report.html"
@@ -1958,6 +1958,94 @@ usage: canu [-version] [-citation] \
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
+def runFlye(details, flye_exec="flye", threads=1, genome_size="5m", prefix=""):
+    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time()-START_TIME))
+    flyeStartTime = time()
+    LOG.write("runFlye: elapsed seconds = %d\n"%(flyeStartTime-START_TIME))
+    comment = """
+usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
+    --nano-corr | --nano-hq ) file1 [file_2 ...]
+    --out-dir PATH
+
+    [--genome-size SIZE] [--threads int] [--iterations int]
+    [--meta] [--polish-target] [--min-overlap SIZE]
+    [--keep-haplotypes] [--debug] [--version] [--help] 
+    [--scaffold] [--resume] [--resume-from] [--stop-after] 
+    [--read-error float] [--extra-params]
+    """
+    # first get flye version
+    p = subprocess.Popen(['flye', "--version"], shell=False, stdout=subprocess.PIPE)
+    flye_version = p.stdout.readline().decode().rstrip()
+    details['version']['flye'] = flye_version
+    details['assembly']['version'] = flye_version
+    details['assembly']['assembler'] = 'flye'
+    p.wait()
+
+    command = ['flye', "--out-dir", '.', "--genome-size", str(genome_size), '--threads', str(threads)]
+    pacbio_reads = []
+    nanopore_reads = []
+    for item in details['reads']:
+        if details['reads'][item]['platform'] in ('pacbio', 'fasta'):
+            pacbio_reads.append(item)
+            if details['reads'][item]['platform'] == 'fasta':
+                comment = 'submitting fasta reads to flye, but calling them "pacbio": '+' '.join(details['platform']['fasta'])
+                LOG.write(comment+"\n")
+                details['problem'].append(comment)
+        elif details['reads'][item]['platform'] == 'nanopore':
+            nanopore_reads.append(item)
+    if pacbio_reads:
+        command.append("--pacbio-raw")
+        command.extend(pacbio_reads)
+    elif nanopore_reads:
+        command.append("--nano-raw")
+        command.extend(nanopore_reads)
+    if not pacbio_reads + nanopore_reads:
+        LOG.write("no long read files available for flye.\n")
+        details["problem"].append("no long read files available for flye")
+        return None
+    LOG.write("flye command =\n"+" ".join(command)+"\n")
+    LOG.flush()
+
+    flyeStartTime = time()
+    #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
+    with open(os.path.join(DETAILS_DIR, prefix+"flye_stdout.txt"), 'w') as FLYE_STDOUT: 
+        return_code = subprocess.call(command, shell=False, stdout=FLYE_STDOUT, stderr=FLYE_STDOUT)
+    LOG.write("return code = %d\n"%return_code)
+    flyeEndTime = time()
+    elapsedTime = flyeEndTime - flyeStartTime
+    elapsedHumanReadable = ""
+    if elapsedTime < 60:
+        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
+    elif elapsedTime < 3600:
+        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
+    else:
+        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
+
+    details["assembly"]['elapsed_time'] = elapsedHumanReadable
+    details["assembly"]['command_line'] = " ".join(command)
+
+    LOG.write("Duration of flye run was %s\n"%(elapsedHumanReadable))
+    if os.path.exists("flye.report"):
+        LOG.write("details_dir = %s\n"%DETAILS_DIR)
+        LOG.write("flye_report file name = %s\n"%(prefix+"flye_report.txt"))
+        flyeReportFile = os.path.join(DETAILS_DIR, (prefix+"flye_report.txt"))
+        LOG.write("moving flye.report to %s\n"%flyeReportFile)
+        shutil.move("flye.report", flyeReportFile)
+    
+    if not os.path.exists("assembly.fasta"):
+        comment = "Flye failed to generate assembly file. Check "+prefix+"flye_report.txt"
+        LOG.write(comment+"\n")
+        details["assembly"]["outcome"] = comment
+        details["problem"].append(comment)
+        return None
+    # rename to canonical contigs.fasta
+    contigsFile = "contigs.fasta"
+    shutil.move("assembly.fasta", contigsFile)
+    if os.path.exists("assembly_graph.gfa"):
+        shutil.move("assembly_graph.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
+    details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    return contigsFile
+
 def write_html_report(htmlFile, details):
     LOG.write("writing html report to %s\n"%htmlFile)
     HTML = open(htmlFile, 'w')
@@ -2227,7 +2315,7 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--max_bases', type=int, default=10000000000, help='process at most this many bases per read file or pair')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
@@ -2387,6 +2475,8 @@ def main():
             contigs = runSpades(details, args)
     elif args.recipe == "canu":
         contigs = runCanu(details, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
+    elif args.recipe == "flye":
+        contigs = runFlye(details, threads=args.threads, genome_size=args.genome_size, prefix=args.prefix)
     elif "spades" in args.recipe or args.recipe == "single-cell":
         if args.recipe == "meta-spades" and (args.pilon_iterations or args.racon_iterations):
             args.pilon_iterations = 0
