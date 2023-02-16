@@ -56,6 +56,9 @@ def inferPlatform(read_id, maxReadLength):
             return "iontorrent"
     else: # one of the long read types (pacbio or nanopore)
         # todo: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
+        dash_delimited_fields = read_id.split("-")
+        if len(dash_delimited_fields) == 5:
+            return "nanopore" # based on user data
         if re.match(r"@\S+/\S+/\S+_\S+$", read_id): #@<MovieName> /<ZMW_number>/<subread-start>_<subread-end> :this is CCS Subread
             return "pacbio" # 
         if re.match(r"@\S+/\S+$", read_id): #@<MovieName>/<ZMW_number> 
