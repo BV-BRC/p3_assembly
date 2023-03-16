@@ -1,0 +1,15 @@
+use strict;
+use Bio::KBase::AppService::SchedulerDB;
+
+my $db = Bio::KBase::AppService::SchedulerDB->new;
+
+my $res = $db->dbh->selectall_arrayref(qq(SELECT id, owner, start_time, finish_time, output_path, output_file, params, maxrss
+					  FROM TaskWithActiveJob
+					  WHERE application_id = 'GenomeAssembly2' AND
+					     state_code = 'C'));
+for my $e (@$res)
+{
+    die Dumper($e);
+}
+
+
