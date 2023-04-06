@@ -1316,10 +1316,10 @@ def main():
 
     if not contigs:
         LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
-        LOG.write("Total time in hours = %.2f\t"%((time() - START_TIME)/3600.0))
-        LOG.write("Total time in seconds = %d\t"%((time() - START_TIME)))
+        LOG.write("Total time in hours = %.2f\n"%((time() - START_TIME)/3600.0))
+        LOG.write("Total time in seconds = %d\n"%((time() - START_TIME)))
         LOG.write("contigs file not generated. Failing.\n")
-        return 1
+        sys.exit(1)
     if not args.contigs:
         main_return_code = 0
     LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
