@@ -29,7 +29,7 @@ def findSingleDifference(s1, s2):
         end = i+1
         return (start, end)
 
-def inferPlatform(read_id, maxReadLength):
+def inferPlatform(read_id, maxReadLength, avgReadQuality):
     """ 
     Analyze sample of text from read file and return one of:
     illumina, iontorrent, pacbio, nanopore, ...
@@ -55,6 +55,12 @@ def inferPlatform(read_id, maxReadLength):
         if len(parts) == 3:
             return "iontorrent"
     else: # one of the long read types (pacbio or nanopore)
+        if avgReadQuality > 11 and avgReadQuality < 31:
+            sys.stderr.write("inferring platform is nanopore from quality: {:.4f}\n".format(avgReadQuality))
+            return "nanopore"
+        else:
+            sys.stderr.write("inferring platform is pacbio from quality: {:.4f}\n".format(avgReadQuality))
+            return "pacbio"
         # todo: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
         dash_delimited_fields = read_id.split("-")
         if len(dash_delimited_fields) == 5:
@@ -171,6 +177,12 @@ class FastqPreprocessor:
             if self.read_set[name]['platform'] == 'nanopore':
                 retval.append(self.read_set[name]['versions'][-1]['files'][0])
         return retval
+
+    def getReadPlatform(self, reads):
+        if reads in self.read_set:
+            return self.read_set[reads]['platform']
+        else:
+            return None
 
     def sampleReads(self, filename):
         self.LOG.write("sampleReads()\n")
@@ -464,6 +476,7 @@ class FastqPreprocessor:
         startTime = time()
         self.LOG.write("\nstart study_reads()\n")
         read_version['avg_length'] = 0
+        read_version['avg_quality'] = 0
         read_version['num_reads'] = 0
         read_version['num_bases'] = 0
         read_version['file_size'] = 0
@@ -506,6 +519,11 @@ class FastqPreprocessor:
         read_ids_paired = True
         totalReadLength = 0
         maxReadLength = 0
+        sumQuality = 0
+        numQualityPositionsSampled = 0
+        qualityPositionsToSamplePerRead = 150
+        numReadsToSampleForQuality = 10000
+
         readNumber = 0
         for i, line1 in enumerate(F1):
             if file2:
@@ -523,22 +541,22 @@ class FastqPreprocessor:
                         if diff == None or sorted((read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]])) != ('1', '2'):
                             read_ids_paired = False
                             read_version["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
-                if i % 4 == 1:
-                    seqLen1 = len(line1)-1
+            if i % 4 == 1:
+                seqLen = len(line1)-1
+                totalReadLength += seqLen
+                maxReadLength = max(maxReadLength, seqLen) 
+                readNumber += 1
+                if file2:
                     seqLen2 = len(line2)-1
-                    totalReadLength += (seqLen1 + seqLen2)
-                    maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
-                    #minReadLength = min(minReadLength, seqLen1, seqLen2)
+                    totalReadLength += seqLen2
+                    maxReadLength = max(maxReadLength, seqLen2) 
                     readNumber += 1
-            else: # no file2 -- single-end reads
-                if i % 4 == 1:
-                    seqLen = len(line1)-1
-                    totalReadLength += seqLen
-                    maxReadLength = max(maxReadLength, seqLen) 
-                    # minReadLength = min(minReadLength, seqLen1)
-                    readNumber += 1
+            if i % 4 == 3 and readNumber < numReadsToSampleForQuality:
+                for j, qual in enumerate(line1[:qualityPositionsToSamplePerRead]):
+                    sumQuality += ord(qual) - 33
+                    numQualityPositionsSampled += 1
             if False and readNumber % 100000 == 0:
-                self.LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
+                self.LOG.write("number of reads and bases studied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
                 self.LOG.flush()
 
         F1.close()
@@ -550,15 +568,18 @@ class FastqPreprocessor:
             avgReadLength = totalReadLength/readNumber
         if file2:
             avgReadLength/=2
+        avgReadQuality = sumQuality / float(numQualityPositionsSampled)
+        self.LOG.write("avgReadLength={}, avgReadQuality={}, maxLength={}, numReads={}, numBases={}\n".format(avgReadLength, avgReadQuality, maxReadLength, readNumber, totalReadLength))
         read_version['avg_length'] = avgReadLength
         read_version['max_read_len'] = maxReadLength
         read_version['num_reads'] = readNumber
         read_version['num_bases'] = totalReadLength
         read_version['sample_read_id'] = sample_read_id 
+        read_version['avg_quality'] = avgReadQuality 
 
         if not read_version['read_set']['platform'] in ('illumina', 'iontorrent', 'nanopore', 'pacbio'):
             self.LOG.write("platform = {}, need to inferPlatform\n".format(read_version['read_set']['platform']))
-            platform = inferPlatform(sample_read_id, maxReadLength)
+            platform = inferPlatform(sample_read_id, maxReadLength, avtReadQuality)
             read_version['read_set']['platform'] = platform
             self.LOG.write("platform inferred to be {}\n".format(platform))
 
