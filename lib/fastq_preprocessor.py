@@ -497,17 +497,17 @@ class FastqPreprocessor:
         else:
             read_version['layout'] = 'single-end'
         if file1.endswith("gz"):
-            F1 = gzip.open(file1)
+            F1 = gzip.open(file1, 'rt')
             if file2:
-                F2 = gzip.open(file2)
+                F2 = gzip.open(file2, 'rt')
         elif file1.endswith("bz2"):
-            F1 = bz2.BZ2File(file1)
+            F1 = bz2.BZ2File(file1, 'rt')
             if file2:
-                F2 = bz2.BZ2File(file2)
+                F2 = bz2.BZ2File(file2, 'rt')
         else:
-            F1 = open(file1)
+            F1 = open(file1, 'rt')
             if file2:
-                F2 = open(file2)
+                F2 = open(file2, 'rt')
 
         line = str(F1.readline().rstrip())
         self.LOG.write("in study_reads, first line of {} is {}\n".format(file1, line))
@@ -521,6 +521,7 @@ class FastqPreprocessor:
         maxReadLength = 0
         sumQuality = 0
         numQualityPositionsSampled = 0
+        numQualityLinesSampled = 0
         qualityPositionsToSamplePerRead = 150
         numReadsToSampleForQuality = 10000
 
@@ -551,7 +552,9 @@ class FastqPreprocessor:
                     totalReadLength += seqLen2
                     maxReadLength = max(maxReadLength, seqLen2) 
                     readNumber += 1
-            if i % 4 == 3 and readNumber < numReadsToSampleForQuality:
+            if i % 4 == 3 and numQualityLinesSampled < numReadsToSampleForQuality and len(line1) > qualityPositionsToSamplePerRead:
+                numQualityLinesSampled += 1
+                j = 0
                 for j, qual in enumerate(line1[:qualityPositionsToSamplePerRead]):
                     sumQuality += ord(qual) - 33
                     numQualityPositionsSampled += 1
@@ -579,7 +582,7 @@ class FastqPreprocessor:
 
         if not read_version['read_set']['platform'] in ('illumina', 'iontorrent', 'nanopore', 'pacbio'):
             self.LOG.write("platform = {}, need to inferPlatform\n".format(read_version['read_set']['platform']))
-            platform = inferPlatform(sample_read_id, maxReadLength, avtReadQuality)
+            platform = inferPlatform(sample_read_id, maxReadLength, avgReadQuality)
             read_version['read_set']['platform'] = platform
             self.LOG.write("platform inferred to be {}\n".format(platform))
 

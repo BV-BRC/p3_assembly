@@ -524,6 +524,25 @@ def convertSamToBam(samFile, threads=1):
     #LOG.write("samtools index return code = %d\n"%return_code)
     return bamFileSorted
 
+def findFastqAverageQuality(fastq_file, readsToScan = 1000):
+    sumQuality = 0
+    numQualityPositionsSampled = 0;
+    readNumber = 0
+    with open(fastq_file) as F:
+        for i, line in enumerate(F):
+            if i % 4 == 3 and readNumber < readsToScan:
+                for qual in line.rstrip():
+                    sumQuality += ord(qual) - 33
+                    numQualityPositionsSampled += 1
+                readNumber += 1
+                if readNumber >= readsToScan:
+                    break
+    if numQualityPositionsSampled > 0:
+        averageQuality = sumQuality / numQualityPositionsSampled
+        return averageQuality
+    else:
+        return None
+
 def runRacon(contigFile, longReadsFastq, platform, threads=1):
     """
     Polish (correct) sequence of assembled contigs by comparing to the original long-read sequences
@@ -545,19 +564,26 @@ def runRacon(contigFile, longReadsFastq, platform, threads=1):
         comment = "runMinimap failed to generate sam file, exiting runRacon"
         LOG.write(comment + "\n")
         return None
+
+    averageQuality = findFastqAverageQuality(longReadsFastq)
+    LOG.write("average quality of {} is {:.3f}, used for racon command.\n".format(longReadsFastq, averageQuality))
     raconStartTime = time()
-    raconContigs = contigFile.replace(".fasta", ".racon.fasta")
-    raconOut = open(raconContigs, 'w')
-    command = ["racon", "-t", str(threads), "-u", longReadsFastq, readsToContigsSam, contigFile]
+    command = ["racon", "-t", str(threads), "-u"]
+    if averageQuality:
+        command.extend(['-q', "{:.2f}".format(averageQuality * 0.5)])
+    command.extend([ longReadsFastq, readsToContigsSam, contigFile])
     LOG.write("racon command: \n"+' '.join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
+
+    raconContigs = contigFile.replace(".fasta", ".racon.fasta")
+    with open(raconContigs, 'w') as raconOut:
+        FNULL = open(os.devnull, 'w') # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
     LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
     if return_code != 0:
         return None
     os.remove(readsToContigsSam)
     raconContigSize = os.path.getsize(raconContigs)
-    LOG.write("size of raconContigs: %d\n"%raconContigsSize)
+    LOG.write("size of raconContigs: %d\n"%raconContigSize)
     if raconContigSize < 10:
         return None
     report = {"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "version": racon_version, "output": raconContigs, "seconds": time()-raconStartTime}
@@ -569,7 +595,7 @@ def runRacon(contigFile, longReadsFastq, platform, threads=1):
         report['original_name'] = raconContigs
         shutil.move(raconContigs, shorterFileName)
         raconContigs = shorterFileName
-        report['output'] = shorterName
+        report['output'] = shorterFileName
         LOG.write("renaming {} to {}\n".format(raconContigs, shorterFileName))
     return report
 
