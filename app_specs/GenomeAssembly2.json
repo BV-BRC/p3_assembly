@@ -30,8 +30,8 @@
             "infer",
             "illumina",
             "pacbio",
-            "nanopore",
-            "iontorrent"
+            "pacbio_hifi",
+            "nanopore"
           ],
           "id": "platform",
           "label": "Sequencing Platform",
@@ -76,8 +76,8 @@
             "infer",
             "illumina",
             "pacbio",
-            "nanopore",
-            "iontorrent"
+            "pacbio_hifi",
+            "nanopore"
           ],
           "id": "platform",
           "label": "Sequencing Platform",
