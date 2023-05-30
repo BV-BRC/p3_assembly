@@ -207,7 +207,7 @@ sub assemble
     #
     # We use TrimGalore here.
     #
-    if ($params->{trim_reads})
+    if ($params->{trim})
     {
 	push(@params, '--trim');
     }
