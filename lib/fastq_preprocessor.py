@@ -7,6 +7,7 @@ import bz2
 import os
 import os.path
 import re
+import glob
 import shutil
 from time import time, localtime, strftime, sleep
 
@@ -420,8 +421,12 @@ class FastqPreprocessor:
         new_read_version = {}
         new_read_version['read_set'] =  read_version['read_set']
         new_read_version['file_size']  = 0
+        new_read_version['transformation'] = "trim with trim-galore"
         num_threads = self.threads
-        command = ['trim_galore', '-j', str(num_threads), '-o', '.']
+        read_file_base = re.sub("(.*?)\..*", "\\1", read_version['files'][0])
+        read_file_base = re.sub("(.*)_R[12].*", "\\1", read_file_base)
+        trim_directory = read_file_base + "_trim_dir"
+        command = ['trim_galore', '-j', str(num_threads), '-o', trim_directory]
         if len(read_version['files']) > 1:
             command.extend(["--paired", read_version['files'][0], read_version['files'][1]])
         else:
@@ -433,40 +438,47 @@ class FastqPreprocessor:
         trimGaloreStderr = proc.stderr.read()
         return_code = proc.wait()
         self.LOG.write("return code = %d\n"%return_code)
-        trimReads = re.findall(r"Writing validated paired-end read \d reads to (\S+)", trimGaloreStderr)
-        if not trimReads:
-            trimReads = re.findall(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
-        self.LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
-        if not trimReads:
+        trimReads = glob.glob(trim_directory + "/*fq.gz")
+        if trimReads:
+            print("trimReads = "+str(trimReads))
+            if 'val' in trimReads[0]:
+                new_name = trimReads[0].replace('val', 'trimmed')
+                shutil.move(trimReads[0], new_name)
+                trimReads[0] = new_name
+                if len(trimReads) > 1:
+                    new_name = trimReads[1].replace('val', 'trimmed')
+                    shutil.move(trimReads[1], new_name)
+                    trimReads[1] = new_name
+            for i, read_file in enumerate(trimReads):
+                new_read_file = os.path.basename(read_file)
+                shutil.move(read_file, new_read_file)
+                trimReads[i] = new_read_file
+                new_read_version['file_size'] += os.path.getsize(new_read_file)
+            new_read_version['files'] = trimReads
+        else:
             comment = "trim_galore did not name trimmed reads output files in stderr"
             self.LOG.write(comment+"\n")
             new_read_version['problem'].append(comment)
-            return new_read_version
-        new_read_version['files']  = []
-        for trimmed_read_file in trimReads:
-            if re.search("val_[12].fq", trimmed_read_file):
-                val_file = trimmed_read_file
-                trimmed_read_file = re.sub("val_[12].fq", "trimmed.fastq", val_file)
-                shutil.move(val_file, trimmed_read_file)
-            if re.search("trimmed.fq", trimmed_read_file):
-                temp_file = trimmed_read_file
-                trimmed_read_file = trimmed_read_file.replace(".fq", ".fastq")
-                shutil.move(temp_file, trimmed_read_file)
-            new_read_version['files'].append(trimmed_read_file)
-            new_read_version['file_size'] += os.path.getsize(trimmed_read_file)
-        comment = "trim_galore, input %s, output %s"%(":".join(read_version['files']), ":".join(trimReads))
-        self.LOG.write(comment+"\n")
-        new_read_version['transformation'] = comment
-        #new_read_version['report'] = 
-        m = re.search(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
-        if m:
-            report_file = m.group(1)
-            self.LOG.write("re.search for trim reports returned %s\n"%str(report_file))
-            new_read_version["trim report"] = report_file
+
+        report_files = glob.glob(trim_directory +'/*trimming_report.txt')
+        if report_files:
+            new_report_file = read_file_base + "_trimming_report.txt"
+            with open(new_report_file, 'w') as F:
+                for rf in report_files:
+                    with open(rf) as RF:
+                        F.write(RF.read())
+            new_read_version["trim report"] = new_report_file
+
         new_read_version['processing_time'] = time() - startTime
         self.LOG.write("trim_short_reads duration: {}\n".format(new_read_version['processing_time']))
-
         return new_read_version
+
+    def saveTrimReport(self, save_dir):
+        for name in sorted(self.read_set):
+            for read_version in self.read_set[name]['versions']:
+                if 'trim report' in read_version:
+                    shutil.copy(read_version['trim report'], save_dir)
+
 
     def study_reads(self, read_version):
         """
@@ -677,16 +689,16 @@ class FastqPreprocessor:
             #raise Exception("down_sample_reads calculated prop_to_sample to be over 1 ({})".format(prop_to_sample))
             return new_read_version
         new_read_version['read_set'] = read_version['read_set']
-        suffix = "_downsampled.fastq"
+        suffix = "_downsampled.fq"
         for read_file in read_version['files']:
             out_file = read_file
-            if read_file.endswith("gz"):
-                out_file = read_file[:-3]
-            if read_file.endswith(".fq"):
-                out_file = read_file[:-3]
-            if read_file.endswith(".fastq"):
-                out_file = read_file[:-6]
-            out_file = out_file + suffix
+            if out_file.endswith("gz"):
+                out_file = out_file[:-3]
+            if out_file.endswith(".fq"):
+                out_file = out_file[:-3]
+            if out_file.endswith(".fastq"):
+                out_file = out_file[:-6]
+            out_file += suffix
 
             new_read_version['files'].append(out_file)
             

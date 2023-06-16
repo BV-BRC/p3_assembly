@@ -1295,13 +1295,13 @@ def main():
     fqProc.setMaxBases(args.max_bases)
     fqProc.setThreads(args.threads)
     fqProc.preprocess_reads()
-
     fqProc.summarize_preprocess()
 
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
-
     LOG.write("details dir = "+DETAILS_DIR+"\n")
+    fqProc.saveTrimReport(DETAILS_DIR)
+
     if args.recipe == "auto":
         #now must decide which assembler to use
 
