@@ -423,7 +423,7 @@ def runSpades(details, fqProc, recipe=None, threads=4, memory=250):
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runMinimap(contigFile, longReadFastq, threads=1, outformat='sam'):
+def runMinimap(contigFile, longReadFastq, platform=None, threads=1, outformat='sam'):
     LOG.write("runMinimap: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     """
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
@@ -442,7 +442,13 @@ def runMinimap(contigFile, longReadFastq, threads=1, outformat='sam'):
 
     # map long reads to contigs
     contigSam = contigFile.replace(".fasta", ".sam")
-    command = ["minimap2", "-t", str(threads), "-a", "-o", contigSam, contigFile, longReadFastq]
+    command = ["minimap2", "-t", str(threads)]
+    if platform:
+        if platform == 'nanopore':
+            command.extend(["-x", "map-ont"])
+        elif platform == 'pacbio':
+            command.extend(["-x", "map-pb"])
+    command.extend(["-a", "-o", contigSam, contigFile, longReadFastq])
     tempTime = time()
     LOG.write("minimap2 map command:\n"+' '.join(command)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
@@ -452,13 +458,15 @@ def runMinimap(contigFile, longReadFastq, threads=1, outformat='sam'):
         return None
 
     if outformat == 'sam':
-        LOG.write('runMinimap returning %s\n'%contigSam)
+        file_size = os.path.getsize(contigSam)
+        LOG.write('runMinimap returning %s, size=%d\n'%(contigSam, file_size))
         return contigSam
 
     else:
-        contigsBam = convertSamToBam(contigSam, threads=threads)
-        LOG.write('runMinimap returning %s\n'%contigsBam)
-        return contigsBam
+        contigBam = convertSamToBam(contigSam, threads=threads)
+        file_size = os.path.getsize(contigBam)
+        LOG.write('runMinimap returning %s, size=%d\n'%(contigBam, file_size))
+        return contigBam
             
 
 def convertSamToBam(samFile, threads=1):
@@ -476,7 +484,7 @@ def convertSamToBam(samFile, threads=1):
     sortThreads = max(int(threads/2), 1)
     samFilePrefix = re.sub(".sam", "", samFile, re.IGNORECASE)
     command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", samFilePrefix+"_unsorted.bam", samFile]
-    LOG.write("executing:\n"+" ".join(command)+"\n")
+    LOG.write("executing: "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
     LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
     os.remove(samFile) #save a little space
@@ -511,19 +519,37 @@ def convertSamToBam(samFile, threads=1):
     LOG.write("samtools sort return code=%d, time=%d, size of %s is %d\n"%(return_code, time()-tempTime, bamFileSorted, os.path.getsize(bamFileSorted)))
 
     command = ["samtools", "index", bamFileSorted]
-    LOG.write("executing:\n"+" ".join(command)+"\n")
+    LOG.write("executing: "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("samtools index return code = %d\n"%return_code)
+    #LOG.write("samtools index return code = %d\n"%return_code)
     return bamFileSorted
 
-def runRacon(contigFile, longReadsFastq, threads=1):
+def findFastqAverageQuality(fastq_file, readsToScan = 1000):
+    sumQuality = 0
+    numQualityPositionsSampled = 0;
+    readNumber = 0
+    with open(fastq_file) as F:
+        for i, line in enumerate(F):
+            if i % 4 == 3 and readNumber < readsToScan:
+                for qual in line.rstrip():
+                    sumQuality += ord(qual) - 33
+                    numQualityPositionsSampled += 1
+                readNumber += 1
+                if readNumber >= readsToScan:
+                    break
+    if numQualityPositionsSampled > 0:
+        averageQuality = sumQuality / numQualityPositionsSampled
+        return averageQuality
+    else:
+        return None
+
+def runRacon(contigFile, longReadsFastq, platform, threads=1):
     """
     Polish (correct) sequence of assembled contigs by comparing to the original long-read sequences
     Run racon on reads, read-to-contig-sam, contigs. Generate polished contigs.
     Return name of polished contigs.
     """
-    LOG.write("Time = %s, total elapsed = %d seconds\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time())), time() - START_TIME))
-    LOG.write('runRacon(%s, %s, %d)\n'%(contigFile, longReadsFastq, threads))
+    LOG.write('runRacon(%s, %s, %s, %d)\n'%(contigFile, longReadsFastq, str(platform), threads))
     report = {}
     command = ["racon", "--version"]
     proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -533,23 +559,31 @@ def runRacon(contigFile, longReadsFastq, threads=1):
         version_text = proc.stdout.read().decode()
     racon_version = version_text.strip()
 
-    readsToContigsSam = runMinimap(contigFile, longReadsFastq, threads, outformat='sam')
+    readsToContigsSam = runMinimap(contigFile, longReadsFastq, platform, threads, outformat='sam')
     if not readsToContigsSam:
         comment = "runMinimap failed to generate sam file, exiting runRacon"
         LOG.write(comment + "\n")
         return None
+
+    averageQuality = findFastqAverageQuality(longReadsFastq)
+    LOG.write("average quality of {} is {:.3f}, used for racon command.\n".format(longReadsFastq, averageQuality))
     raconStartTime = time()
-    raconContigs = contigFile.replace(".fasta", ".racon.fasta")
-    raconOut = open(raconContigs, 'w')
-    command = ["racon", "-t", str(threads), "-u", longReadsFastq, readsToContigsSam, contigFile]
+    command = ["racon", "-t", str(threads), "-u"]
+    if averageQuality:
+        command.extend(['-q', "{:.2f}".format(averageQuality * 0.5)])
+    command.extend([ longReadsFastq, readsToContigsSam, contigFile])
     LOG.write("racon command: \n"+' '.join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
+
+    raconContigs = contigFile.replace(".fasta", ".racon.fasta")
+    with open(raconContigs, 'w') as raconOut:
+        FNULL = open(os.devnull, 'w') # send stdout to dev/null
         return_code = subprocess.call(command, shell=False, stderr=FNULL, stdout=raconOut)
     LOG.write("racon return code = %d, time = %d seconds\n"%(return_code, time()-raconStartTime))
-    os.remove(readsToContigsSam)
     if return_code != 0:
         return None
+    os.remove(readsToContigsSam)
     raconContigSize = os.path.getsize(raconContigs)
+    LOG.write("size of raconContigs: %d\n"%raconContigSize)
     if raconContigSize < 10:
         return None
     report = {"input_contigs":contigFile, "reads": longReadsFastq, "program": "racon", "version": racon_version, "output": raconContigs, "seconds": time()-raconStartTime}
@@ -558,10 +592,12 @@ def runRacon(contigFile, longReadsFastq, threads=1):
     os.remove(contigFile) #delete old one
     if re.search("racon.racon.fasta", raconContigs):
         shorterFileName = re.sub("racon.racon.fasta", "racon.fasta", raconContigs)
+        report['original_name'] = raconContigs
         shutil.move(raconContigs, shorterFileName)
         raconContigs = shorterFileName
+        report['output'] = shorterFileName
         LOG.write("renaming {} to {}\n".format(raconContigs, shorterFileName))
-    return raconContigs, report
+    return report
 
 def runBowtie(contigFile, read_files, threads=1, outformat='bam'):
     """
@@ -573,10 +609,10 @@ def runBowtie(contigFile, read_files, threads=1, outformat='bam'):
         shutil.rmtree('bowtie_index_dir')
     os.mkdir("bowtie_index_dir")
     command = ["bowtie2-build", "--threads", str(threads), contigFile, 'bowtie_index_dir/'+contigFile]
-    LOG.write("executing:\n"+" ".join(command)+"\n")
+    LOG.write("executing: "+" ".join(command)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout and stderr to dev/null
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
-    LOG.write("bowtie2-build return code = %d\n"%return_code)
+    #LOG.write("bowtie2-build return code = %d\n"%return_code)
     if return_code != 0:
         return None
 
@@ -593,7 +629,7 @@ def runBowtie(contigFile, read_files, threads=1, outformat='bam'):
     fastqBase = re.sub(r"\..*", "", fastqBase)
     samFile = contigFile+"_"+fastqBase+".sam"
     command.extend(('-S', samFile))
-    LOG.write("executing:\n"+" ".join(command)+"\n")
+    LOG.write("executing: "+" ".join(command)+"\n")
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
     LOG.write("bowtie2 return code = %d\n"%return_code)
@@ -639,7 +675,7 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     pilonContigs = pilonPrefix #+ ".fasta"
     command.extend(('--outdir', '.', '--output', pilonContigs, '--changes'))
     command.extend(('--threads', str(threads)))
-    LOG.write("executing:\n"+" ".join(command)+"\n")
+    LOG.write("executing: "+" ".join(command)+"\n")
     LOG.write("bamfile = {}, size={}\n", (bamFile, os.path.getsize(bamFile)))
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
         return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
@@ -1087,10 +1123,11 @@ def write_html_report(htmlFile, fqProc, details):
             <tbody>
             """)
         for iteration, info in enumerate(details['polishing']):
-            HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", iteration+1))
-            for key in sorted(info):
-                HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(info[key])))
-            HTML.write("<tr></tr>\n") # blank row
+            if info:
+                HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", iteration+1))
+                for key in sorted(info):
+                    HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(info[key])))
+                HTML.write("<tr></tr>\n") # blank row
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
 
@@ -1258,13 +1295,13 @@ def main():
     fqProc.setMaxBases(args.max_bases)
     fqProc.setThreads(args.threads)
     fqProc.preprocess_reads()
-
     fqProc.summarize_preprocess()
 
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
-
     LOG.write("details dir = "+DETAILS_DIR+"\n")
+    fqProc.saveTrimReport(DETAILS_DIR)
+
     if args.recipe == "auto":
         #now must decide which assembler to use
 
@@ -1325,28 +1362,32 @@ def main():
     LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
     if args.racon_iterations:
         # now run racon with each long-read file
-        long_reads = fqProc.getLongReads()
         if 'minimap2' not in details['version']:
             command = ["minimap2", "--version"]
             proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
             proc.wait()
             version_text = proc.stdout.read().decode()
             details["version"]['minimap2'] = version_text.strip()
-        for longReadFile in long_reads:
-            try:
-                for i in range(0, args.racon_iterations):
-                    LOG.write("runRacon(%s, %s, round=%d, threads=%d)\n"%(contigs, longReadFile, i, args.threads))
-                    raconContigFile, raconReport = runRacon(contigs, longReadFile, threads=args.threads)
-                    details['polishing'].append(raconReport)
-                    if raconContigFile is not None:
-                        contigs = raconContigFile
-                        sys.stderr.write("contigs file is now {}\n".format(contigs))
-                    else:
-                        break # break out of iterating racon_iterations, go to next long-read file if any
-            except Exception as e:
-                comment = "runRacon failed with exception {}".format(e)
-                LOG.write(comment)
-                sys.stderr.write(comment)
+        for platform in ["nanopore", "pacbio"]:
+            long_reads = fqProc.getPlatformReads(platform) # returns list of lists
+            for longReadFile in long_reads:
+                #try:
+                    for i in range(0, args.racon_iterations):
+                        LOG.write("runRacon on %s, %s, platform=%s, round=%d\n"%(contigs, longReadFile[0], platform, i))
+                        raconReport = runRacon(contigs, longReadFile[0], platform=platform, threads=args.threads) 
+                        raconContigFile = None
+                        if raconReport and 'output' in raconReport:
+                            raconContigFile = raconReport['output']
+                            details['polishing'].append(raconReport)
+                        if raconContigFile is not None:
+                            contigs = raconContigFile
+                            sys.stderr.write("contigs file is now {}\n".format(contigs))
+                        else:
+                            break # break out of iterating racon_iterations, go to next long-read file if any
+                #except Exception as e:
+                #    comment = "runRacon failed with exception {}\n".format(e)
+                #    LOG.write(comment)
+                #    sys.stderr.write(comment)
         
     if args.pilon_iterations and args.pilon_jar:
         pilon_end_time = time() + args.pilon_hours * 60 * 60

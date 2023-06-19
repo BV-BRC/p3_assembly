@@ -7,6 +7,7 @@ import bz2
 import os
 import os.path
 import re
+import glob
 import shutil
 from time import time, localtime, strftime, sleep
 
@@ -29,7 +30,7 @@ def findSingleDifference(s1, s2):
         end = i+1
         return (start, end)
 
-def inferPlatform(read_id, maxReadLength):
+def inferPlatform(read_id, maxReadLength, avgReadQuality):
     """ 
     Analyze sample of text from read file and return one of:
     illumina, iontorrent, pacbio, nanopore, ...
@@ -55,6 +56,12 @@ def inferPlatform(read_id, maxReadLength):
         if len(parts) == 3:
             return "iontorrent"
     else: # one of the long read types (pacbio or nanopore)
+        if avgReadQuality > 11 and avgReadQuality < 31:
+            sys.stderr.write("inferring platform is nanopore from quality: {:.4f}\n".format(avgReadQuality))
+            return "nanopore"
+        else:
+            sys.stderr.write("inferring platform is pacbio from quality: {:.4f}\n".format(avgReadQuality))
+            return "pacbio"
         # todo: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
         dash_delimited_fields = read_id.split("-")
         if len(dash_delimited_fields) == 5:
@@ -171,6 +178,12 @@ class FastqPreprocessor:
             if self.read_set[name]['platform'] == 'nanopore':
                 retval.append(self.read_set[name]['versions'][-1]['files'][0])
         return retval
+
+    def getReadPlatform(self, reads):
+        if reads in self.read_set:
+            return self.read_set[reads]['platform']
+        else:
+            return None
 
     def sampleReads(self, filename):
         self.LOG.write("sampleReads()\n")
@@ -408,8 +421,12 @@ class FastqPreprocessor:
         new_read_version = {}
         new_read_version['read_set'] =  read_version['read_set']
         new_read_version['file_size']  = 0
+        new_read_version['transformation'] = "trim with trim-galore"
         num_threads = self.threads
-        command = ['trim_galore', '-j', str(num_threads), '-o', '.']
+        read_file_base = re.sub("(.*?)\..*", "\\1", read_version['files'][0])
+        read_file_base = re.sub("(.*)_R[12].*", "\\1", read_file_base)
+        trim_directory = read_file_base + "_trim_dir"
+        command = ['trim_galore', '-j', str(num_threads), '-o', trim_directory]
         if len(read_version['files']) > 1:
             command.extend(["--paired", read_version['files'][0], read_version['files'][1]])
         else:
@@ -421,40 +438,47 @@ class FastqPreprocessor:
         trimGaloreStderr = proc.stderr.read()
         return_code = proc.wait()
         self.LOG.write("return code = %d\n"%return_code)
-        trimReads = re.findall(r"Writing validated paired-end read \d reads to (\S+)", trimGaloreStderr)
-        if not trimReads:
-            trimReads = re.findall(r"Writing final adapter and quality trimmed output to (\S+)", trimGaloreStderr)
-        self.LOG.write("regex for trimmed files returned %s\n"%str(trimReads))
-        if not trimReads:
+        trimReads = glob.glob(trim_directory + "/*fq.gz")
+        if trimReads:
+            print("trimReads = "+str(trimReads))
+            if 'val' in trimReads[0]:
+                new_name = trimReads[0].replace('val', 'trimmed')
+                shutil.move(trimReads[0], new_name)
+                trimReads[0] = new_name
+                if len(trimReads) > 1:
+                    new_name = trimReads[1].replace('val', 'trimmed')
+                    shutil.move(trimReads[1], new_name)
+                    trimReads[1] = new_name
+            for i, read_file in enumerate(trimReads):
+                new_read_file = os.path.basename(read_file)
+                shutil.move(read_file, new_read_file)
+                trimReads[i] = new_read_file
+                new_read_version['file_size'] += os.path.getsize(new_read_file)
+            new_read_version['files'] = trimReads
+        else:
             comment = "trim_galore did not name trimmed reads output files in stderr"
             self.LOG.write(comment+"\n")
             new_read_version['problem'].append(comment)
-            return new_read_version
-        new_read_version['files']  = []
-        for trimmed_read_file in trimReads:
-            if re.search("val_[12].fq", trimmed_read_file):
-                val_file = trimmed_read_file
-                trimmed_read_file = re.sub("val_[12].fq", "trimmed.fastq", val_file)
-                shutil.move(val_file, trimmed_read_file)
-            if re.search("trimmed.fq", trimmed_read_file):
-                temp_file = trimmed_read_file
-                trimmed_read_file = trimmed_read_file.replace(".fq", ".fastq")
-                shutil.move(temp_file, trimmed_read_file)
-            new_read_version['files'].append(trimmed_read_file)
-            new_read_version['file_size'] += os.path.getsize(trimmed_read_file)
-        comment = "trim_galore, input %s, output %s"%(":".join(read_version['files']), ":".join(trimReads))
-        self.LOG.write(comment+"\n")
-        new_read_version['transformation'] = comment
-        #new_read_version['report'] = 
-        m = re.search(r"Writing report to '(.*report.txt)'", trimGaloreStderr)
-        if m:
-            report_file = m.group(1)
-            self.LOG.write("re.search for trim reports returned %s\n"%str(report_file))
-            new_read_version["trim report"] = report_file
+
+        report_files = glob.glob(trim_directory +'/*trimming_report.txt')
+        if report_files:
+            new_report_file = read_file_base + "_trimming_report.txt"
+            with open(new_report_file, 'w') as F:
+                for rf in report_files:
+                    with open(rf) as RF:
+                        F.write(RF.read())
+            new_read_version["trim report"] = new_report_file
+
         new_read_version['processing_time'] = time() - startTime
         self.LOG.write("trim_short_reads duration: {}\n".format(new_read_version['processing_time']))
-
         return new_read_version
+
+    def saveTrimReport(self, save_dir):
+        for name in sorted(self.read_set):
+            for read_version in self.read_set[name]['versions']:
+                if 'trim report' in read_version:
+                    shutil.copy(read_version['trim report'], save_dir)
+
 
     def study_reads(self, read_version):
         """
@@ -464,6 +488,7 @@ class FastqPreprocessor:
         startTime = time()
         self.LOG.write("\nstart study_reads()\n")
         read_version['avg_length'] = 0
+        read_version['avg_quality'] = 0
         read_version['num_reads'] = 0
         read_version['num_bases'] = 0
         read_version['file_size'] = 0
@@ -484,17 +509,17 @@ class FastqPreprocessor:
         else:
             read_version['layout'] = 'single-end'
         if file1.endswith("gz"):
-            F1 = gzip.open(file1)
+            F1 = gzip.open(file1, 'rt')
             if file2:
-                F2 = gzip.open(file2)
+                F2 = gzip.open(file2, 'rt')
         elif file1.endswith("bz2"):
-            F1 = bz2.BZ2File(file1)
+            F1 = bz2.BZ2File(file1, 'rt')
             if file2:
-                F2 = bz2.BZ2File(file2)
+                F2 = bz2.BZ2File(file2, 'rt')
         else:
-            F1 = open(file1)
+            F1 = open(file1, 'rt')
             if file2:
-                F2 = open(file2)
+                F2 = open(file2, 'rt')
 
         line = str(F1.readline().rstrip())
         self.LOG.write("in study_reads, first line of {} is {}\n".format(file1, line))
@@ -506,6 +531,12 @@ class FastqPreprocessor:
         read_ids_paired = True
         totalReadLength = 0
         maxReadLength = 0
+        sumQuality = 0
+        numQualityPositionsSampled = 0
+        numQualityLinesSampled = 0
+        qualityPositionsToSamplePerRead = 150
+        numReadsToSampleForQuality = 10000
+
         readNumber = 0
         for i, line1 in enumerate(F1):
             if file2:
@@ -523,22 +554,24 @@ class FastqPreprocessor:
                         if diff == None or sorted((read_id_1[diff[0]:diff[1]], read_id_2[diff[0]:diff[1]])) != ('1', '2'):
                             read_ids_paired = False
                             read_version["problem"].append("id_mismatch at read %d: %s vs %s"%(readNumber+1, read_id_1, read_id_2))
-                if i % 4 == 1:
-                    seqLen1 = len(line1)-1
+            if i % 4 == 1:
+                seqLen = len(line1)-1
+                totalReadLength += seqLen
+                maxReadLength = max(maxReadLength, seqLen) 
+                readNumber += 1
+                if file2:
                     seqLen2 = len(line2)-1
-                    totalReadLength += (seqLen1 + seqLen2)
-                    maxReadLength = max(maxReadLength, seqLen1, seqLen2) 
-                    #minReadLength = min(minReadLength, seqLen1, seqLen2)
+                    totalReadLength += seqLen2
+                    maxReadLength = max(maxReadLength, seqLen2) 
                     readNumber += 1
-            else: # no file2 -- single-end reads
-                if i % 4 == 1:
-                    seqLen = len(line1)-1
-                    totalReadLength += seqLen
-                    maxReadLength = max(maxReadLength, seqLen) 
-                    # minReadLength = min(minReadLength, seqLen1)
-                    readNumber += 1
+            if i % 4 == 3 and numQualityLinesSampled < numReadsToSampleForQuality and len(line1) > qualityPositionsToSamplePerRead:
+                numQualityLinesSampled += 1
+                j = 0
+                for j, qual in enumerate(line1[:qualityPositionsToSamplePerRead]):
+                    sumQuality += ord(qual) - 33
+                    numQualityPositionsSampled += 1
             if False and readNumber % 100000 == 0:
-                self.LOG.write("number of reads and bases tudied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
+                self.LOG.write("number of reads and bases studied so far: \t{}\t{}\n".format(readNumber, totalReadLength))
                 self.LOG.flush()
 
         F1.close()
@@ -550,15 +583,18 @@ class FastqPreprocessor:
             avgReadLength = totalReadLength/readNumber
         if file2:
             avgReadLength/=2
+        avgReadQuality = sumQuality / float(numQualityPositionsSampled)
+        self.LOG.write("avgReadLength={}, avgReadQuality={}, maxLength={}, numReads={}, numBases={}\n".format(avgReadLength, avgReadQuality, maxReadLength, readNumber, totalReadLength))
         read_version['avg_length'] = avgReadLength
         read_version['max_read_len'] = maxReadLength
         read_version['num_reads'] = readNumber
         read_version['num_bases'] = totalReadLength
         read_version['sample_read_id'] = sample_read_id 
+        read_version['avg_quality'] = avgReadQuality 
 
         if not read_version['read_set']['platform'] in ('illumina', 'iontorrent', 'nanopore', 'pacbio'):
             self.LOG.write("platform = {}, need to inferPlatform\n".format(read_version['read_set']['platform']))
-            platform = inferPlatform(sample_read_id, maxReadLength)
+            platform = inferPlatform(sample_read_id, maxReadLength, avgReadQuality)
             read_version['read_set']['platform'] = platform
             self.LOG.write("platform inferred to be {}\n".format(platform))
 
@@ -653,16 +689,16 @@ class FastqPreprocessor:
             #raise Exception("down_sample_reads calculated prop_to_sample to be over 1 ({})".format(prop_to_sample))
             return new_read_version
         new_read_version['read_set'] = read_version['read_set']
-        suffix = "_downsampled.fastq"
+        suffix = "_downsampled.fq"
         for read_file in read_version['files']:
             out_file = read_file
-            if read_file.endswith("gz"):
-                out_file = read_file[:-3]
-            if read_file.endswith(".fq"):
-                out_file = read_file[:-3]
-            if read_file.endswith(".fastq"):
-                out_file = read_file[:-6]
-            out_file = out_file + suffix
+            if out_file.endswith("gz"):
+                out_file = out_file[:-3]
+            if out_file.endswith(".fq"):
+                out_file = out_file[:-3]
+            if out_file.endswith(".fastq"):
+                out_file = out_file[:-6]
+            out_file += suffix
 
             new_read_version['files'].append(out_file)
             
