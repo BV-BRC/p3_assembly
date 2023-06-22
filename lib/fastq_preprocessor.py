@@ -421,6 +421,7 @@ class FastqPreprocessor:
         new_read_version = {}
         new_read_version['read_set'] =  read_version['read_set']
         new_read_version['file_size']  = 0
+        new_read_version['problem']  = []
         new_read_version['transformation'] = "trim with trim-galore"
         num_threads = self.threads
         read_file_base = re.sub("(.*?)\..*", "\\1", read_version['files'][0])
@@ -438,7 +439,8 @@ class FastqPreprocessor:
         trimGaloreStderr = proc.stderr.read()
         return_code = proc.wait()
         self.LOG.write("return code = %d\n"%return_code)
-        trimReads = glob.glob(trim_directory + "/*fq.gz")
+        trimReads = glob.glob(trim_directory + "/*fq")
+        trimReads.extend( glob.glob(trim_directory + "/*fq.gz") )
         if trimReads:
             print("trimReads = "+str(trimReads))
             if 'val' in trimReads[0]:
@@ -492,6 +494,7 @@ class FastqPreprocessor:
         read_version['num_reads'] = 0
         read_version['num_bases'] = 0
         read_version['file_size'] = 0
+        read_version['problem'] = []
         self.LOG.write("file(s): "+':'.join(read_version['files'])+"\n")
 
         file1 = read_version['files'][0]
@@ -534,7 +537,7 @@ class FastqPreprocessor:
         sumQuality = 0
         numQualityPositionsSampled = 0
         numQualityLinesSampled = 0
-        qualityPositionsToSamplePerRead = 150
+        qualityPositionsToSamplePerRead = 50
         numReadsToSampleForQuality = 10000
 
         readNumber = 0
@@ -564,7 +567,7 @@ class FastqPreprocessor:
                     totalReadLength += seqLen2
                     maxReadLength = max(maxReadLength, seqLen2) 
                     readNumber += 1
-            if i % 4 == 3 and numQualityLinesSampled < numReadsToSampleForQuality and len(line1) > qualityPositionsToSamplePerRead:
+            if i % 4 == 3 and numQualityLinesSampled < numReadsToSampleForQuality:
                 numQualityLinesSampled += 1
                 j = 0
                 for j, qual in enumerate(line1[:qualityPositionsToSamplePerRead]):
@@ -583,7 +586,9 @@ class FastqPreprocessor:
             avgReadLength = totalReadLength/readNumber
         if file2:
             avgReadLength/=2
-        avgReadQuality = sumQuality / float(numQualityPositionsSampled)
+        avgReadQuality = 0
+        if numQualityPositionsSampled:
+            avgReadQuality = sumQuality / float(numQualityPositionsSampled)
         self.LOG.write("avgReadLength={}, avgReadQuality={}, maxLength={}, numReads={}, numBases={}\n".format(avgReadLength, avgReadQuality, maxReadLength, readNumber, totalReadLength))
         read_version['avg_length'] = avgReadLength
         read_version['max_read_len'] = maxReadLength
