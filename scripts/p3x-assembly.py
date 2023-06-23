@@ -1176,7 +1176,7 @@ def main():
     main_return_code = 1 # set to zero when we have an assembly
     START_TIME = time()
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--outputDirectory', '-d', default='p3_assembly')
+    parser.add_argument('--outputDirectory', '-d', default='p3_assembly_work')
     illumina_or_iontorrent = parser.add_mutually_exclusive_group()
     illumina_or_iontorrent.add_argument('--illumina', metavar='files', nargs='*', help='Illumina fastq[.gz] files or pairs; use ":" between end-pairs or  percent-sign between mate-pairs', required=False, default=[])
     illumina_or_iontorrent.add_argument('--iontorrent', metavar='files', nargs='*', help='list of IonTorrent[.gz] files or pairs, use : between paired-end-files', required=False, default=[])
