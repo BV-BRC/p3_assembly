@@ -68,7 +68,7 @@ def runQuast(contigsFile, args, details):
         proc.wait()
         details["version"]["quast"] = version_text
 
-def filterContigsByLengthAndCoverage(inputContigs, fqProc, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
+def filterContigsByLengthAndCoverage(inputContigs, fqProc, args):   #, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
     Write only sequences at or above min_length and min coverage to output file.
     """
@@ -79,7 +79,7 @@ def filterContigsByLengthAndCoverage(inputContigs, fqProc, min_contig_length=300
     bamFiles = []
     short_reads = fqProc.getShortReads()
     for read_files in short_reads:
-        bam = runBowtie(inputContigs, read_files, threads=threads, outformat='bam')
+        bam = runBowtie(inputContigs, read_files, args, outformat='bam')
         if bam:
             bamFiles.append(bam)
     if bamFiles:
@@ -88,14 +88,14 @@ def filterContigsByLengthAndCoverage(inputContigs, fqProc, min_contig_length=300
     bamFiles = []
     long_reads = fqProc.getLongReads()
     for read_file in long_reads:
-        bam = runMinimap(inputContigs, read_file, threads=threads, outformat='bam')
+        bam = runMinimap(inputContigs, read_file, args, outformat='bam')
         if bam:
             bamFiles.append(bam)
     if bamFiles:
         (average_depth, longReadDepth) = calcReadDepth(bamFiles)
         report['average depth (long reads)'] = average_depth
-    report['min_contig_length_threshold'] = "%d"%min_contig_length
-    report["min_contig_coverage_threshold"] = "%.1f"%min_contig_coverage
+    report['min_contig_length_threshold'] = "%d"%args.min_contig_length
+    report["min_contig_coverage_threshold"] = "%.1f"%args.min_contig_coverage
     num_good_contigs = num_bad_contigs = 0
     suboptimalContigs = ""
     total_seq_length = 0
@@ -115,9 +115,9 @@ def filterContigsByLengthAndCoverage(inputContigs, fqProc, min_contig_length=300
                 m = re.match(r">(\S+)", line)
                 if m or not line: 
                     if seq:
-                        contigId = ">"+prefix+"contig_%d"%contigIndex
+                        contigId = ">"+args.prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
-                        if len(seq) < min_contig_length:
+                        if len(seq) < args.min_contig_length:
                             suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
                             num_bad_contigs += 1
                             continue
@@ -128,11 +128,11 @@ def filterContigsByLengthAndCoverage(inputContigs, fqProc, min_contig_length=300
                         if shortReadDepth and seqId in shortReadDepth:
                             short_read_coverage, normalizedDepth = shortReadDepth[seqId]
                             contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
-                            passes_coverage_threshold = short_read_coverage >= min_contig_coverage
+                            passes_coverage_threshold = short_read_coverage >= args.min_contig_coverage
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                            passes_coverage_threshold |= long_read_coverage >= min_contig_coverage
+                            passes_coverage_threshold |= long_read_coverage >= args.min_contig_coverage
                         if passes_coverage_threshold:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
@@ -182,7 +182,7 @@ def runBandage(gfaFile, details):
     if os.path.exists(gfaFile):
         plotFile = gfaFile.replace(".gfa", ".plot"+imageFormat)
         command = ["Bandage", "image", gfaFile, plotFile]
-        LOG.write("Bandage command =\n"+" ".join(command)+"\n")
+        LOG.write(" ".join(command)+"\n")
         try:
             with open(os.devnull, 'w') as FNULL:
                 return_code = subprocess.call(command, shell=False, stderr=FNULL)
@@ -242,8 +242,8 @@ def runUnicycler(details, fqProc, threads=1, min_contig_length=0, prefix="", spa
         command.extend(("--long", long_reads[0]))
     # it is not quite right to send iontorrent data to spades through unicycler because the --iontorrent flag to spades will not be set
 
-    LOG.write("Unicycler command =\n"+" ".join(command)+"\n")
-    LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
+    LOG.write(" ".join(command)+"\n")
+    #LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     LOG.flush()
     unicyclerStartTime = time()
     details["assembly"]['command_line'] = " ".join(command)
@@ -357,33 +357,32 @@ def runSpades(details, fqProc, recipe=None, threads=4, memory=250):
         if i > 8:
             LOG.write("more than 9 paired-end read files! Spades cannot take more.")
             break 
+        sys.stderr.write("adding paired files: "+str(read_files)+"\n")
         command.extend(("--pe{}-1".format(i+1), read_files[0], "--pe{}-2".format(i+1), read_files[1]))
+        sys.stderr.write("command so far: "+str(command)+"\n")
 
     single_end_reads = fqProc.getUnpairedShortReads()
-    for  i, read_file in enumerate(single_end_reads):
+    for  i, read_files in enumerate(single_end_reads):
         if i > 8:
             LOG.write("more than 9 single-end read files! Spades cannot take more.")
             break 
-        command.extend(("--s{}".format(i+1), read_file))
+        command.extend(("--s{}".format(i+1), read_files[0]))
 
     pacbio_reads = fqProc.getPlatformReads('pacbio')
-    if pacbio_reads:
-        command.append("--pacbio")
-        command.extend(pacbio_reads)
+    for read_files in pacbio_reads:
+        command.extend(["--pacbio", read_files[0]])
 
     nanopore_reads = fqProc.getPlatformReads('nanopore')
-    if nanopore_reads:
-        command.append("--nanopore")
-        command.extend(nanopore_reads)
+    for read_files in nanopore_reads:
+        command.extend(["--nanopore", read_files[0]])
 
-    LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
-    LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
+    LOG.write("SPAdes command =\n"+str(command)+"\n")
+    #LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     LOG.flush()
     spadesStartTime = time()
 
     details['assembly']['command_line'] = " ".join(command)
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+    return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     LOG.write("return code = %d\n"%return_code)
 
     contigsFile = "contigs.fasta"
@@ -423,12 +422,12 @@ def runSpades(details, fqProc, recipe=None, threads=4, memory=250):
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runMinimap(contigFile, longReadFastq, platform=None, threads=1, outformat='sam'):
+def runMinimap(contigFile, longReadFastq, args, platform=None, outformat='sam'):
     LOG.write("runMinimap: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     """
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
     """
-    LOG.write("runMinimap(%s, %s, %d, %s)\n"%(contigFile, longReadFastq, threads, outformat))
+    LOG.write("runMinimap(%s, %s, %s, %s)\n"%(contigFile, longReadFastq, str(type(args)), outformat))
     # index contig sequences
     #contigIndex = contigFile.replace(".fasta", ".mmi")
     #command = ["minimap2", "-t", str(threads), "-d", contigIndex, contigFile] 
@@ -442,7 +441,7 @@ def runMinimap(contigFile, longReadFastq, platform=None, threads=1, outformat='s
 
     # map long reads to contigs
     contigSam = contigFile.replace(".fasta", ".sam")
-    command = ["minimap2", "-t", str(threads)]
+    command = ["minimap2", "-t", str(args.threads)]
     if platform:
         if platform == 'nanopore':
             command.extend(["-x", "map-ont"])
@@ -450,11 +449,10 @@ def runMinimap(contigFile, longReadFastq, platform=None, threads=1, outformat='s
             command.extend(["-x", "map-pb"])
     command.extend(["-a", "-o", contigSam, contigFile, longReadFastq])
     tempTime = time()
-    LOG.write("minimap2 map command:\n"+' '.join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null
-        return_code = subprocess.call(command, shell=False, stderr=FNULL)
-    LOG.write("minimap2 map return code = %d, time = %d seconds\n"%(return_code, time() - tempTime))
+    LOG.write(' '.join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stderr=subprocess.DEVNULL)
     if return_code != 0:
+        LOG.write("minimap2 map return code = %d, time = %d seconds\n"%(return_code, time() - tempTime))
         return None
 
     if outformat == 'sam':
@@ -463,15 +461,15 @@ def runMinimap(contigFile, longReadFastq, platform=None, threads=1, outformat='s
         return contigSam
 
     else:
-        contigBam = convertSamToBam(contigSam, threads=threads)
+        contigBam = convertSamToBam(contigSam, args)
         file_size = os.path.getsize(contigBam)
         LOG.write('runMinimap returning %s, size=%d\n'%(contigBam, file_size))
         return contigBam
             
 
-def convertSamToBam(samFile, threads=1):
+def convertSamToBam(samFile, args):
     #convert format to bam and index
-    LOG.write("convertSamToBam(%s, %d)\n"%(samFile, threads))
+    LOG.write("convertSamToBam(%s, %s)\n"%(samFile, str(type(args))))
     tempTime = time()
     command = ["samtools"]
     proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
@@ -481,13 +479,12 @@ def convertSamToBam(samFile, threads=1):
         if 'Version' in line:
             samtools_version = line.strip()
 
-    sortThreads = max(int(threads/2), 1)
+    sortThreads = max(int(args.threads/2), 1)
     samFilePrefix = re.sub(".sam", "", samFile, re.IGNORECASE)
     command = ["samtools", "view", "-bS", "-@", str(sortThreads), "-o", samFilePrefix+"_unsorted.bam", samFile]
-    LOG.write("executing: "+" ".join(command)+"\n")
+    LOG.write(" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
-    LOG.write("samtools view return code = %d, time=%d\n"%(return_code, time()-tempTime))
-    os.remove(samFile) #save a little space
+    #os.remove(samFile) #save a little space
     if return_code != 0:
         comment = "samtools view returned %d"%return_code
         LOG.write(comment+"\n")
@@ -516,7 +513,8 @@ def convertSamToBam(samFile, threads=1):
         comment = "{0} of size zero, sorting bamfile failed, convertSamToBam failed\n".format(bamFileSorted)
         LOG.write(comment+"\n")
         return None
-    LOG.write("samtools sort return code=%d, time=%d, size of %s is %d\n"%(return_code, time()-tempTime, bamFileSorted, os.path.getsize(bamFileSorted)))
+    if args.verbose:
+        LOG.write("samtools sort return code=%d, time=%d, size of %s is %d\n"%(return_code, time()-tempTime, bamFileSorted, os.path.getsize(bamFileSorted)))
 
     command = ["samtools", "index", bamFileSorted]
     LOG.write("executing: "+" ".join(command)+"\n")
@@ -543,13 +541,14 @@ def findFastqAverageQuality(fastq_file, readsToScan = 1000):
     else:
         return None
 
-def runRacon(contigFile, longReadsFastq, platform, threads=1):
+def runRacon(contigFile, longReadsFastq, platform, args):
     """
     Polish (correct) sequence of assembled contigs by comparing to the original long-read sequences
     Run racon on reads, read-to-contig-sam, contigs. Generate polished contigs.
     Return name of polished contigs.
     """
-    LOG.write('runRacon(%s, %s, %s, %d)\n'%(contigFile, longReadsFastq, str(platform), threads))
+    if args.verbose:
+        LOG.write('runRacon(%s, %s, %s, %s)\n'%(contigFile, longReadsFastq, str(platform), str(type(args))))
     report = {}
     command = ["racon", "--version"]
     proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -559,7 +558,7 @@ def runRacon(contigFile, longReadsFastq, platform, threads=1):
         version_text = proc.stdout.read().decode()
     racon_version = version_text.strip()
 
-    readsToContigsSam = runMinimap(contigFile, longReadsFastq, platform, threads, outformat='sam')
+    readsToContigsSam = runMinimap(contigFile, longReadsFastq, args, platform=platform, outformat='sam')
     if not readsToContigsSam:
         comment = "runMinimap failed to generate sam file, exiting runRacon"
         LOG.write(comment + "\n")
@@ -568,7 +567,7 @@ def runRacon(contigFile, longReadsFastq, platform, threads=1):
     averageQuality = findFastqAverageQuality(longReadsFastq)
     LOG.write("average quality of {} is {:.3f}, used for racon command.\n".format(longReadsFastq, averageQuality))
     raconStartTime = time()
-    command = ["racon", "-t", str(threads), "-u"]
+    command = ["racon", "-t", str(args.threads), "-u"]
     if averageQuality:
         command.extend(['-q', "{:.2f}".format(averageQuality * 0.5)])
     command.extend([ longReadsFastq, readsToContigsSam, contigFile])
@@ -599,39 +598,46 @@ def runRacon(contigFile, longReadsFastq, platform, threads=1):
         LOG.write("renaming {} to {}\n".format(raconContigs, shorterFileName))
     return report
 
-def runBowtie(contigFile, read_files, threads=1, outformat='bam'):
+def runBowtie(contigFile, read_files, args, outformat='bam'):
     """
     index contigsFile, then run bowtie2, then convert sam file to pos-sorted bam and index
     """
-    LOG.write("runBowtie: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
+    LOG.write("runBowtie(%s, %s, %s, %s) %s\n"%(contigFile, read_files, str(type(args)), outformat, strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     if os.path.exists("bowtie_index_dir"):
         # delete dir and all files there
         shutil.rmtree('bowtie_index_dir')
     os.mkdir("bowtie_index_dir")
-    command = ["bowtie2-build", "--threads", str(threads), contigFile, 'bowtie_index_dir/'+contigFile]
+    command = ["bowtie2-build", "--threads", str(args.threads), contigFile, 'bowtie_index_dir/'+contigFile]
     LOG.write("executing: "+" ".join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout and stderr to dev/null
-        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+    return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     #LOG.write("bowtie2-build return code = %d\n"%return_code)
     if return_code != 0:
         return None
 
-    command = ["bowtie2", "-p", str(threads)]
+    command = ["bowtie2", "-p", str(args.threads)]
     command.extend(["-x", 'bowtie_index_dir/'+contigFile])
     fastqBase=''
-    if len(read_files) > 1:
-        read1, read2 = read_files[:2]
-        command.extend(('-1', read1, '-2', read2))
-        fastqBase = read1
+    sys.stderr.write("type of read_files is %s\n"%(str(type(read_files))))
+    if type(read_files) == type(['a', 'b']): # test whether it is an array of two read files
+        if len(read_files) > 1:
+            sys.stderr.write("we have a pair of read files\n")
+            read1, read2 = read_files[:2]
+            command.extend(('-1', read1, '-2', read2))
+            fastqBase = read1
+        else:
+            sys.stderr.write("we have a list with a single read file\n")
+            command.extend(('-U', read_files[0]))
+            fastqBase = read_files[0]
+
     else:
-        command.extend(('-U', read_files[0]))
+        sys.stderr.write("we have a single read file\n")
+        command.extend(('-U', read_files))
         fastqBase = read_files[0]
     fastqBase = re.sub(r"\..*", "", fastqBase)
     samFile = contigFile+"_"+fastqBase+".sam"
     command.extend(('-S', samFile))
-    LOG.write("executing: "+" ".join(command)+"\n")
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+    LOG.write(" ".join(command)+"\n")
+    return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     LOG.write("bowtie2 return code = %d\n"%return_code)
     shutil.rmtree('bowtie_index_dir')
     if return_code != 0:
@@ -640,27 +646,28 @@ def runBowtie(contigFile, read_files, threads=1, outformat='bam'):
         return samFile
 
     else:
-        contigsBam = convertSamToBam(samFile, threads=threads)
+        contigsBam = convertSamToBam(samFile, args)
         LOG.write('runBowtie returning %s\n'%contigsBam)
         return contigsBam
 
-def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
+def runPilon(contigFile, shortReadFastq, args, details):
     """ 
     polish contigs with short reads (illumina or iontorrent)
     first map reads to contigs with bowtie
     """
     LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
-    if not (pilon_jar and os.path.exists(pilon_jar)):
-        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
+    LOG.write("runPilon(%s, %s, %s, %s)\n"%(contigFile, shortReadFastq, str(type(args)), len(details)))
+    if not (args.pilon_jar and os.path.exists(args.pilon_jar)):
+        comment = "jarfile %s not found for runPilon, giving up"%(args.pilon_jar)
         LOG.write(comment+"\n")
         return
 
-    bamFile = runBowtie(contigFile, shortReadFastq, threads=threads, outformat='bam')
+    bamFile = runBowtie(contigFile, shortReadFastq, args, outformat='bam')
     if not (bamFile and os.path.exists(bamFile)):
         sys.stderr.write("Problem: runBowtie failed to return expected bamfile {}\n".format(bamFile))
         return None
     pilon_start_time = time()
-    command = ['java', '-Xmx32G', '-jar', pilon_jar, '--genome', contigFile]
+    command = ['java', '-Xmx32G', '-jar', args.pilon_jar, '--genome', contigFile]
     if ':' in shortReadFastq:
         command.extend(('--frags', bamFile))
     else:
@@ -674,14 +681,14 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
         pilonPrefix += "_pilon_1"
     pilonContigs = pilonPrefix #+ ".fasta"
     command.extend(('--outdir', '.', '--output', pilonContigs, '--changes'))
-    command.extend(('--threads', str(threads)))
-    LOG.write("executing: "+" ".join(command)+"\n")
-    LOG.write("bamfile = {}, size={}\n", (bamFile, os.path.getsize(bamFile)))
-    with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-        return_code = subprocess.call(command, shell=False, stdout=FNULL, stderr=FNULL)
+    command.extend(('--threads', str(args.threads)))
+    LOG.write(" ".join(command)+"\n")
+    LOG.write("bamfile = {}, size={}\n".format(bamFile, os.path.getsize(bamFile)))
+    return_code = subprocess.call(command, shell=False)  #, stdout=sys.stderr, stderr=sys.stderr) #, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     LOG.write("pilon return code = %d\n"%return_code)
     pilon_time = time() - pilon_start_time
     LOG.write("pilon duration = %d\n"%(pilon_time))
+    LOG.flush()
     os.remove(bamFile)
     if os.path.exists(bamFile+".bai"):
         os.remove(bamFile+".bai")
@@ -690,21 +697,21 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     pilon_changes = 0
     with open(pilonContigs+".changes") as CHANGES:
         pilon_changes = len(CHANGES.read().splitlines())
-    os.remove(pilonContigs+".changes")
-    report = {"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes, "seconds" : time() - pilon_time}
+    #os.remove(pilonContigs+".changes")
+    report = {"input_contigs":contigFile, "reads": shortReadFastq, "program": "pilon", "output": pilonContigs, "num_changes": pilon_changes, "seconds" : pilon_time}
 
-    command = ["java", "-jar", pilon_jar, "--version"]
+    command = ["java", "-jar", args.pilon_jar, "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
     proc.wait()
-    report["pilon_version"] = proc.stdout.read().decode()
+    report["version"] = proc.stdout.read().decode()
 
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
     details["post-assembly transformation"].append(comment)
     new_contigFile = pilonContigs+'.fasta'
     os.remove(contigFile) # clean up old one
-    os.remove(bamFile)
-    return new_contigFile 
+    #os.remove(bamFile)
+    return new_contigFile, report 
 
 def calcReadDepth(bamfiles):
     """ Return dict of contig_ids to tuple of (coverage, normalized_coverage) """
@@ -718,7 +725,8 @@ def calcReadDepth(bamfiles):
     LOG.write("command = "+" ".join(command)+"\n")
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
     depthData = proc.communicate()[0].decode()
-    LOG.write("length of depthData string = %d\n"%len(depthData))
+    if 0:
+        LOG.write("length of depthData string = %d\n"%len(depthData))
     depthSum = 0
     totalDepthSum = 0
     totalLength = 0
@@ -751,8 +759,8 @@ def calcReadDepth(bamfiles):
         readDepth[prevContig] = [meanDepth, 0]
         contigLength[prevContig] = length
 
-    LOG.write("total length for depth data = %d\n"%totalLength)
-    LOG.write("total depth = %.1f\n"%totalDepthSum)
+    #LOG.write("total length for depth data = %d\n"%totalLength)
+    #LOG.write("total depth = %.1f\n"%totalDepthSum)
     LOG.write("len(readDepth) = %d\n"%len(readDepth))
     totalMeanDepth = 0
     if totalLength > 0:
@@ -908,7 +916,7 @@ usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
         LOG.write("no long read files available for flye.\n")
         details["problem"].append("no long read files available for flye")
         return None
-    LOG.write("flye command =\n"+" ".join(command)+"\n")
+    LOG.write(" ".join(command)+"\n")
     LOG.flush()
 
     flyeStartTime = time()
@@ -1126,7 +1134,12 @@ def write_html_report(htmlFile, fqProc, details):
             if info:
                 HTML.write("<tr><td>%s:</td><td>%d</td></tr>\n"%("Round", iteration+1))
                 for key in sorted(info):
-                    HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, str(info[key])))
+                    if key == 'version':
+                        continue # don't repetetively show version, should be in Tools Used section
+                    value = str(info[key])
+                    if key == 'seconds':
+                        value = "{:.2f}".format(info[key])
+                    HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, value))
                 HTML.write("<tr></tr>\n") # blank row
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
@@ -1210,7 +1223,8 @@ def main():
     parser.add_argument('--spades_for_unicycler', help='path to spades.py suitable for unicycler')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
     parser.add_argument('--params_json', help='JSON file with additional information.')
-    parser.add_argument('--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
+    parser.add_argument('--path_prefix', '--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
+    parser.add_argument('-v', '--verbose', action='store_true', help="Output more progress information.", required=False)
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -1312,12 +1326,12 @@ def main():
         LOG.write("number of long reads = {}\n".format(len(long_reads)))
         if len(short_reads):
             args.recipe = "unicycler"
-            LOG.write("auto recipe using unicycler due to presence of short read data")
+            LOG.write("auto recipe using unicycler due to presence of short read data.\n")
         elif len(long_reads):
             args.recipe = "flye"
-            LOG.write("auto recipe using flye due to presence of long and absence of short read data")
+            LOG.write("auto recipe using flye due to presence of long and absence of short read data.\n")
         else:
-            comment = "auto recipe, but failed to find short or long reeds\n"
+            comment = "auto recipe failed to find short or long reads\n"
             LOG.write(comment)
             raise Exception(comment)
 
@@ -1374,11 +1388,12 @@ def main():
                 #try:
                     for i in range(0, args.racon_iterations):
                         LOG.write("runRacon on %s, %s, platform=%s, round=%d\n"%(contigs, longReadFile[0], platform, i))
-                        raconReport = runRacon(contigs, longReadFile[0], platform=platform, threads=args.threads) 
+                        raconReport = runRacon(contigs, longReadFile[0], platform, args) 
                         raconContigFile = None
                         if raconReport and 'output' in raconReport:
                             raconContigFile = raconReport['output']
                             details['polishing'].append(raconReport)
+                            details['version']['racon'] = raconReport['version']
                         if raconContigFile is not None:
                             contigs = raconContigFile
                             sys.stderr.write("contigs file is now {}\n".format(contigs))
@@ -1394,28 +1409,26 @@ def main():
         # now run pilon with each short-read file
         short_read_files = fqProc.getShortReads()
         for read_files in short_read_files:
-            try:
-                fastqFile = read_files[0] # use only read_1 if paired
-                for iteration in range(0, args.pilon_iterations):
-                    if time() > pilon_end_time:
-                        LOG.write("Time expended on pilon exceeds allocation of {} hours. Omitting further pilon runs.".format(args.pilon_hours))
-                        break
-
-                    LOG.write("runPilon(%s, %s, round=%d, threads=%d)\n"%(contigs, fastqFile, iteration, args.threads))
-                    pilonContigFile, pilonReport = runPilon(contigs, fastqFile, args.pilon_jar, args.threads)
-                    details['polishing'].append(pilonReport)
-                    if pilonContigFile is not None and os.path.exists(pilonContigFile):
-                        contigs = pilonContigFile
-                        sys.stderr.write("contigs file is now {}\n".format(contigs))
-                    else:
-                        sys.stderr.write("expected contifs file {} does not exist\n".format(contigs))
-                        break
-                # check number of changes in most recent round, quit if zero
-                if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+            fastqFile = read_files[0] # use only read_1 if paired
+            for iteration in range(0, args.pilon_iterations):
+                if time() > pilon_end_time:
+                    LOG.write("Time expended on pilon exceeds allocation of {} hours. Omitting further pilon runs.".format(args.pilon_hours))
                     break
-            except Exception as e:
-                comment = "runPilon failed with exception {}\n".format(e)
-                LOG.write(comment)
+
+                LOG.write("runPilon(%s, %s, ...)\n"%(contigs, fastqFile))
+                pilonContigFile, pilonReport = runPilon(contigs, fastqFile, args, details)
+                details['polishing'].append(pilonReport)
+                if 'version' in pilonReport:
+                    details['version']['pilon'] = pilonReport['version']
+                if pilonContigFile is not None and os.path.exists(pilonContigFile):
+                    contigs = pilonContigFile
+                    sys.stderr.write("contigs file is now {}\n".format(contigs))
+                else:
+                    sys.stderr.write("expected contifs file {} does not exist\n".format(contigs))
+                    break
+            # check number of changes in most recent round, quit if zero
+            if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+                break
             
     if contigs and os.path.getsize(contigs):
         command = ["samtools"]
@@ -1425,7 +1438,7 @@ def main():
         for line in version_text.splitlines():
             if 'Version' in line:
                 details["version"]['samtools'] = line.strip()
-        filteredContigs, filterReport = filterContigsByLengthAndCoverage(contigs, fqProc, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
+        filteredContigs, filterReport = filterContigsByLengthAndCoverage(contigs, fqProc, args)
         details['contig_filtering'] = filterReport
         if filteredContigs:
             contigs = filteredContigs
@@ -1444,7 +1457,7 @@ def main():
             LOG.write("Problem writing details to json: "+str(ude)+"\n")
 
 
-    htmlFile = os.path.join(SAVE_DIR, args.prefix+"assembly_report.html")
+    htmlFile = os.path.join(SAVE_DIR, "AssemblyReport.html")
     write_html_report(htmlFile, fqProc, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
