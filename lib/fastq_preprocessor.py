@@ -151,7 +151,7 @@ class FastqPreprocessor:
         self.LOG.write("getShortReads\n")
         for name in self.read_set:
             self.LOG.write("read_set {}, length_class: {}\n".format(name, self.read_set[name]['length_class']))
-            self.LOG.write("read_set explicit: {}\n\n".format(self.read_set[name]))
+            #self.LOG.write("read_set explicit: {}\n\n".format(self.read_set[name]))
             if self.read_set[name]['length_class'] == 'short':
                 retval.append(self.read_set[name]['versions'][-1]['files'])
                 self.LOG.write("     adding files "+", ".join(self.read_set[name]['versions'][-1]['files'])+"\n")
@@ -722,13 +722,13 @@ class FastqPreprocessor:
         return new_read_version
          
     def writeHtmlSection(self, HTML):
-        HTML.write('<div>\n<h2>Fastq Preprocessing</h2>\n')
+        HTML.write('<div>\n<h2>Preprocessing of Reads</h2>\n')
         for name in sorted(self.read_set):
             HTML.write("<p>"+name+"</p><br>\n")
             HTML.write("""
             <table class="med-table kv-table">
                 <thead class="table-header">
-                <tr> <th>#</th><th>Process</th><th>File(s)</th><th>Size</th><th>Reads</th><th>Bases</th><th>Time</th></tr></thead>
+                <tr> <th>#</th><th>Process</th><th>File(s)</th><th>Size</th><th>Reads</th><th>Avg Length</th><th>Time</th></tr></thead>
                 <tbody>
                 """)
             for i, read_version in enumerate(self.read_set[name]['versions']):
@@ -739,12 +739,12 @@ class FastqPreprocessor:
                 HTML.write("<td>{}</td>".format(read_version['num_reads']))
                 HTML.write("<td>{:.1f}</td>".format(read_version['avg_length']))
                 if 'process_time' in read_version:
-                    HTML.write("<td>{}</td>".format(read_version['process_time']))
-                if 'study_reads_time' in read_version:
-                    HTML.write("<td>{}</td>".format(read_version['study_reads_time']))
+                    HTML.write("<td>{:.2f}</td>".format(read_version['process_time']))
+                #if 'study_reads_time' in read_version:
+                #    HTML.write("<td>{:.2f}</td>".format(read_version['study_reads_time']))
                 HTML.write("</tr>\n")
-        HTML.write("</tbody></table>\n")
-        HTML.write("</div\n")
+            HTML.write("</tbody></table>\n")
+        HTML.write("</div>\n")
 
     def writeHtmlReport(self, file_name="fastq_preprocess.html"):
         HTML = open(file_name, 'w')
