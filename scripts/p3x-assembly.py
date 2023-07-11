@@ -366,7 +366,7 @@ def runSpades(details, fqProc, recipe=None, threads=4, memory=250):
         if i > 8:
             LOG.write("more than 9 single-end read files! Spades cannot take more.")
             break 
-        command.extend(("--s{}".format(i+1), read_files[0]))
+        command.extend(("--s{}".format(i+1), read_files))
 
     pacbio_reads = fqProc.getPlatformReads('pacbio')
     for read_files in pacbio_reads:
@@ -523,20 +523,26 @@ def convertSamToBam(samFile, args):
     return bamFileSorted
 
 def findFastqAverageQuality(fastq_file, readsToScan = 1000):
+    print("findFastqAverageQuality({}, {})".format(fastq_file, readsToScan))
     sumQuality = 0
     numQualityPositionsSampled = 0;
     readNumber = 0
-    with open(fastq_file) as F:
-        for i, line in enumerate(F):
-            if i % 4 == 3 and readNumber < readsToScan:
-                for qual in line.rstrip():
-                    sumQuality += ord(qual) - 33
+    if fastq_file.endswith("gz"):
+        F = gzip.open(fastq_file)
+    else:
+        F = open(fastq_file)
+    for i, line in enumerate(F):
+        if i % 4 == 3 and readNumber < readsToScan:
+            for qual in line.rstrip().decode():
+                if type(qual) == type('a'): # weird error - sometimes qual is an int
+                    sumQuality += (ord(qual) - 33)
                     numQualityPositionsSampled += 1
-                readNumber += 1
-                if readNumber >= readsToScan:
-                    break
+            readNumber += 1
+            if readNumber >= readsToScan:
+                break
+    F.close()
     if numQualityPositionsSampled > 0:
-        averageQuality = sumQuality / numQualityPositionsSampled
+        averageQuality = sumQuality / float(numQualityPositionsSampled)
         return averageQuality
     else:
         return None
@@ -565,7 +571,7 @@ def runRacon(contigFile, longReadsFastq, platform, args):
         return None
 
     averageQuality = findFastqAverageQuality(longReadsFastq)
-    LOG.write("average quality of {} is {:.3f}, used for racon command.\n".format(longReadsFastq, averageQuality))
+    LOG.write("average quality of {} is {}, used for racon command.\n".format(longReadsFastq, averageQuality))
     raconStartTime = time()
     command = ["racon", "-t", str(args.threads), "-u"]
     if averageQuality:
