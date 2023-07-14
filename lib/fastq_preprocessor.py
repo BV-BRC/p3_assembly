@@ -439,11 +439,13 @@ class FastqPreprocessor:
         trimGaloreStderr = proc.stderr.read()
         return_code = proc.wait()
         self.LOG.write("return code = %d\n"%return_code)
-        trimReads = glob.glob(trim_directory + "/*fq")
-        trimReads.extend( glob.glob(trim_directory + "/*fq.gz") )
+        trimReads = glob.glob(trim_directory + "/*val_?.fq")
+        if not trimReads:
+            trimReads = glob.glob(trim_directory + "/*fq")
+            trimReads.extend( glob.glob(trim_directory + "/*fq.gz") )
         if trimReads:
-            print("trimReads = "+str(trimReads))
-            if 'val' in trimReads[0]:
+            print("trimmed reads = "+str(trimReads))
+            if False and 'val' in trimReads[0]:
                 new_name = trimReads[0].replace('val', 'trimmed')
                 shutil.move(trimReads[0], new_name)
                 trimReads[0] = new_name
@@ -458,7 +460,7 @@ class FastqPreprocessor:
                 new_read_version['file_size'] += os.path.getsize(new_read_file)
             new_read_version['files'] = trimReads
         else:
-            comment = "trim_galore did not name trimmed reads output files in stderr"
+            comment = "trim_galore did not generate trimmed reads"
             self.LOG.write(comment+"\n")
             new_read_version['problem'].append(comment)
 
