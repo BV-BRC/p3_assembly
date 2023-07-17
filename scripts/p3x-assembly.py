@@ -528,12 +528,12 @@ def findFastqAverageQuality(fastq_file, readsToScan = 1000):
     numQualityPositionsSampled = 0;
     readNumber = 0
     if fastq_file.endswith("gz"):
-        F = gzip.open(fastq_file)
+        F = gzip.open(fastq_file, mode='rt')
     else:
         F = open(fastq_file)
     for i, line in enumerate(F):
         if i % 4 == 3 and readNumber < readsToScan:
-            for qual in line.rstrip().decode():
+            for qual in line.rstrip():
                 if type(qual) == type('a'): # weird error - sometimes qual is an int
                     sumQuality += (ord(qual) - 33)
                     numQualityPositionsSampled += 1

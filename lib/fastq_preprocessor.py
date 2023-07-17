@@ -193,9 +193,9 @@ class FastqPreprocessor:
         read_id_sample = []
 
         if filename.endswith("gz"):
-            F = gzip.open(filename)
+            F = gzip.open(filename, 'rt')
         elif filename.endswith("bz2"):
-            F = bz2.BZ2File(filename)
+            F = bz2.BZ2File(filename, mode='rt')
         else:
             F = open(filename)
         text = F.read(FastqPreprocessor.bytes_to_sample) #read X number of bytes for text sample
