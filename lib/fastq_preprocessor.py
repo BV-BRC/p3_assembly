@@ -386,8 +386,8 @@ class FastqPreprocessor:
             if read_file.endswith('.bz2'):
                 uncompressed_file = read_file[:-4] # trim off '.bz2''
                 new_read_version['files'].append(uncompressed_file)
-                with open(os.path.join(WORK_DIR, uncompressed_file), 'w') as OUT:
-                    with open(os.path.join(WORK_DIR, read_file)) as IN:
+                with open(os.path.join(self.WORK_DIR, uncompressed_file), 'wb') as OUT:
+                    with open(os.path.join(self.WORK_DIR, read_file), 'rb') as IN:
                         OUT.write(bz2.decompress(IN.read()))
                         comment = "decompressing bz2 file %s to %s"%(read_file, uncompressed_file)
                         self.LOG.write(comment+"\n")
@@ -400,7 +400,7 @@ class FastqPreprocessor:
 
         new_read_version['transformation'] = "remove bz2 compression"
         new_read_version['command'] = "python bz2.decompress()"
-        new_read_version['processing_time'] = time() - startTime()
+        new_read_version['processing_time'] = time() - startTime
         self.LOG.write("bunzip_reads duration: {}\n".format(new_read_version['processing_time']))
         return new_read_version
 
