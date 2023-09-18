@@ -369,6 +369,13 @@ def runSpades(details, read_list, recipe=None, threads=4, memory=250):
         if 'problem' not in details['assembly']:
             details['assembly']['problem'] = []
         details['assembly']['problem'].append(comment)
+        comment = "try again adding '--only-assembler' option to spades"
+        LOG.write(comment+"\n")
+        details['assembly']['problem'].append(comment)
+        command.append("--only-assembler")
+        details['assembly']['command_line'] = " ".join(command)
+        return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        LOG.write("return code = %d\n"%return_code)
 
     spadesEndTime = time()
     elapsedTime = spadesEndTime - spadesStartTime
@@ -1271,11 +1278,13 @@ def main():
             read_list.append(readLib)
 
     if args.pacbio:
+        platform = 'pacbio'
         for item in args.pacbio:
             readLib = ReadLibrary(item, platform=platform, work_dir=WORK_DIR)
             read_list.append(readLib)
 
     if args.nanopore:
+        platform = 'nanopore'
         for item in args.nanopore:
             readLib = ReadLibrary(item, platform=platform, work_dir=WORK_DIR)
             read_list.append(readLib)
