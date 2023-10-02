@@ -113,19 +113,22 @@ class ReadLibrary:
         self.transformation ='original'
         self.versions = []
         self.files = []
+        input_files = []
         ReadLibrary.LOG.write("read files passed to constructor: {}, type={}\n".format(file_names, type(file_names)))
         if type(file_names) is str:
-            self.files.append(file_names)
+            input_files.append(file_names)
             ReadLibrary.LOG.write("single-end\n")
         else: # an array of strings
-            self.files.extend(file_names)
+            input_files.extend(file_names)
             ReadLibrary.LOG.write("paired-end\n")
-        self.file_size = [0]*len(self.files)
-        for i, read_file in enumerate(self.files):
+        self.files = [0]*len(input_files)
+        self.file_size = [0]*len(input_files)
+        for i, read_file in enumerate(input_files):
             if os.path.exists(read_file):
                 self.file_size[i] = os.path.getsize(read_file)
                 if work_dir: # symlink files to where work will be performed
                     dir_name, file_base = os.path.split(read_file)
+                    self.files[i] = file_base
                     ReadLibrary.LOG.write("symlinking %s to %s\n"%(os.path.abspath(read_file), os.path.join(work_dir, file_base)))
                     if os.path.exists(os.path.join(work_dir,file_base)):
                         ReadLibrary.LOG.write("first deleting file {}\n".format(os.path.join(work_dir,file_base)))
@@ -139,11 +142,6 @@ class ReadLibrary:
                 self.problem.append(comment)
                 raise Exception(comment)
 
-        # see if we need to handle bz2 compression - some programs cannot handle it
-        if self.files[0].endswith(".bz2"):
-            self.bunzip_reads()
-        self.study_reads()
-        
     def store_current_version(self):
         print("store_current_version: self={}, s.v={}".format(self, self.versions))
         current_version = copy.deepcopy(self)
@@ -189,7 +187,6 @@ class ReadLibrary:
             ReadLibrary.program_version['trim_galore'] = trim_galore_version
 
         self.problem = []
-        self.transformation = "trim with trim-galore"
         read_file_base = re.sub("(.*?)\..*", "\\1", self.files[0])
         read_file_base = re.sub("(.*)_R[12].*", "\\1", read_file_base)
         trim_directory = read_file_base + "_trim_dir"
@@ -220,6 +217,7 @@ class ReadLibrary:
                 self.files[i] = new_read_file
 
             self.study_reads()
+            self.transformation = "trim-galore"
 
             report_files = glob.glob(trim_directory +'/*trimming_report.txt')
             if report_files:
@@ -253,6 +251,10 @@ class ReadLibrary:
         """
         startTime = time()
         ReadLibrary.LOG.write("\nstart study_reads()\n")
+        # see if we need to handle bz2 compression - some programs cannot handle it
+        if self.files[0].endswith(".bz2"):
+            self.bunzip_reads()
+        
         self.format = 'fastq'
         self.avg_length = 0
         self.avg_quality = 0
@@ -527,7 +529,7 @@ class ReadLibrary:
             HTML.write("<td>{}</td>".format(read_version.transformation))
             HTML.write("<td>{}</td>".format(" ".join(read_version.files)))
             HTML.write("<td>{}</td>".format(read_version.num_reads))
-            HTML.write("<td>{:.3f}</td>".format(read_version.num_bases / 1e6))
+            HTML.write("<td>{:.2f}</td>".format(read_version.num_bases / 1e6))
             HTML.write("<td>{:.1f}</td>".format(read_version.avg_length))
             HTML.write("</tr>\n")
         HTML.write("</tbody></table>\n")
