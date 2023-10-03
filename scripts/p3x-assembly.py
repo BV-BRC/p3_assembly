@@ -1089,7 +1089,7 @@ def write_html_report(htmlFile, read_list, details):
             HTML.write("</div>\n")
         HTML.write("</section>\n")
 
-    if 'assembly' in details:
+    if 'assembly' in details and len(details['assembly']):
         HTML.write('<section>\n<h2>Assembly</h2>\n')
         HTML.write("""
         <table class="med-table kv-table">
@@ -1192,7 +1192,7 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--max_bases', type=int, default=MAX_BASES, help='downsample reads if more than this total bases.')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto', 'none'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
@@ -1207,8 +1207,8 @@ def main():
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
-    parser.add_argument('-t', '--threads', metavar='cores', type=int, default=4)
-    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=250, help='RAM limit in Gb')
+    parser.add_argument('-t', '--threads', metavar='cores', type=int, default=8)
+    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=125, help='RAM limit in Gb')
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--normalize', action='store_true', help='normalize read depth with BBNorm at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
@@ -1266,6 +1266,7 @@ def main():
     details['max_bases']=args.max_bases
 
     ReadLibrary.NUM_THREADS = args.threads
+    ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
     read_list = []
     if args.anonymous_reads:
@@ -1393,20 +1394,17 @@ def main():
             LOG.write(comment+"\n")
             details['problem'].append(comment)
         contigs = runSpades(details, read_list, prefix=args.prefix, recipe=args.recipe, threads=args.threads, memory=args.memory)
-
+    elif args.recipe == 'none':
+        LOG.write("recipe specified as 'none', no assembly will be performed\n")
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
     if not contigs:
-        LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
-        LOG.write("Total time in hours = %.2f\n"%((time() - START_TIME)/3600.0))
-        LOG.write("Total time in seconds = %d\n"%((time() - START_TIME)))
-        LOG.write("contigs file not generated. Failing.\n")
-        sys.exit(1)
-    if not args.contigs:
-        main_return_code = 0
-    LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
-    if args.racon_iterations:
+        if args.contigs:
+            LOG.write("contigs supplied as {}\n".format(args.contigs))
+    if contigs:
+        LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+    if args.racon_iterations and contigs:
         # now run racon with each long-read file
             for longReadSet in long_reads:
                 for i in range(0, args.racon_iterations):
@@ -1425,7 +1423,7 @@ def main():
                     else:
                         break # break out of iterating racon_iterations, go to next long-read file if any
         
-    if args.pilon_iterations and args.pilon_jar:
+    if args.pilon_iterations and args.pilon_jar and contigs:
         pilon_end_time = time() + args.pilon_hours * 60 * 60
         # now run pilon with each short-read file
         for read_set in short_reads:

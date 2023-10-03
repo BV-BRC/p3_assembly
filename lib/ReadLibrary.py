@@ -83,7 +83,7 @@ def findSingleDifference(s1, s2):
 
 class ReadLibrary:
     # representation of read set, with specific versions included within (e.g., trimmed version)
-    DEF_MEMORY = '5gb'
+    MEMORY = '5gb'
     MAX_SHORT_READ_LENGTH = 999
     NUM_THREADS = 4
     MAX_BASES=1e9
@@ -425,9 +425,10 @@ class ReadLibrary:
             out_file2 = out_file2 + suffix
 
         bbnorm_fh = open(bbnorm_stdout, 'w')
-        command = ['bbnorm.sh', 'threads={}'.format(ReadLibrary.NUM_THREADS), 'in='+file1, 'out='+out_file1]
+        command = ['bbnorm.sh', 'in='+file1, 'out='+out_file1]
         if file2:
             command.extend(('in2='+file2, 'out2='+out_file2))
+        command.extend(['threads={}'.format(ReadLibrary.NUM_THREADS), '-Xmx{:.0f}g'.format(ReadLibrary.MEMORY * 0.85)])
 
         ReadLibrary.LOG.write("normalize, command line = "+" ".join(command)+"\n")
         self.command = " ".join(command)
@@ -445,12 +446,21 @@ class ReadLibrary:
             comment = "normalize read depth using BBNorm"
             self.transformation=comment
             self.process_time = time() - startTime
+
+            proc = subprocess.run("bbnorm.sh", capture_output=True, text=True)
+            for line in proc.stdout.split("\n"):
+                m = re.match("Last modified\s*(\S.*\S)", line)
+                if m:
+                    bbnorm_version = m.group(1)
+                    ReadLibrary.program_version['bbnorm'] = bbnorm_version
+                    break
+
         else:
             # keep current, unnormalized, version
             ReadLibrary.LOG.write("bbnorm failed to normalize")
             
 
-        ReadLibrary.LOG.write("normalize process time: {}\n".format(self.process_time))
+        ReadLibrary.LOG.write("normalize process time: {}\n".format(time() - startTime))
         return
 
     def down_sample_reads(self, max_bases=0):
