@@ -245,7 +245,7 @@ sub assemble
     #
     
     my @cmd = ("p3x-assembly",
-	       "--prefix", $prefix,
+	       "--prefix", "$prefix",
 	       "--pilon_jar", $pilon,
 	       "--path-prefix", @path_additions,
 	       @params);
