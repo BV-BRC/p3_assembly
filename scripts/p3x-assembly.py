@@ -98,7 +98,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
     report['min_contig_length_threshold'] = "%d"%args.min_contig_length
     report["min_contig_coverage_threshold"] = "%.1f"%args.min_contig_coverage
     num_good_contigs = num_bad_contigs = 0
-    suboptimalContigs = ""
+    suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
     total_seq_length = 0
     weighted_short_read_coverage = 0
     weighted_long_read_coverage = 0
@@ -106,6 +106,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
     LOG.write("writing filtered contigs to %s\n"%outputContigs)
     with open(inputContigs) as IN:
         with open(outputContigs, 'w') as OUT:
+            SUBOPT = open(os.path.join(DETAILS_DIR, suboptimalContigsFile), "w")
             seqId=None
             seq = ""
             contigIndex = 1
@@ -118,23 +119,22 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
                     if seq:
                         contigId = ">"+args.prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
-                        if len(seq) < args.min_contig_length:
-                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
-                            num_bad_contigs += 1
-                            continue
                         contigIndex += 1
                         short_read_coverage = 0
                         long_read_coverage = 0
-                        passes_coverage_threshold = False
+                        passes_thresholds = False
                         if shortReadDepth and seqId in shortReadDepth:
                             short_read_coverage, normalizedDepth = shortReadDepth[seqId]
                             contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
-                            passes_coverage_threshold = short_read_coverage >= args.min_contig_coverage
+                            passes_thresholds = short_read_coverage >= args.min_contig_coverage
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                            passes_coverage_threshold |= long_read_coverage >= args.min_contig_coverage
-                        if passes_coverage_threshold:
+                            passes_thresholds |= long_read_coverage >= args.min_contig_coverage
+                        if len(seq) < args.min_contig_length:
+                            passes_thresholds = False
+                            num_bad_contigs += 1
+                        if passes_thresholds:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
@@ -144,11 +144,13 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
                             if long_read_coverage:
                                 weighted_long_read_coverage += long_read_coverage * len(seq)
                             total_seq_length += len(seq)
+                            if "circular=true" in line:
+                                num_circular_contigs += 1
                         else:
-                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
+                            SUBOPT.write(contigId+contigInfo+"\n")
+                            for i in range(0, len(seq), 60):
+                                SUBOPT.write(seq[i:i+60]+"\n")
                             num_bad_contigs += 1
-                        if "circular=true" in line:
-                            num_circular_contigs += 1
                         seq = ""
                     if m:
                         seqId = m.group(1)
@@ -164,18 +166,15 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
     report['total length of good contigs'] = "%d"%total_seq_length
     if num_circular_contigs:
         report['contigs predicted circular'] = "%d"%num_circular_contigs
-    if suboptimalContigs:
-        suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
+    if num_bad_contigs:
         report["suboptimal contigs file"] = suboptimalContigsFile
-        suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
-        with open(suboptimalContigsFile, "w") as SUBOPT:
-            SUBOPT.write(suboptimalContigs)
-    if os.path.getsize(outputContigs) < 10:
-        LOG.write("failed to generate outputContigs, return None\n")
-        return None
+    if num_good_contigs:
+        report['good contigs file'] = outputContigs
+    else:
+        LOG.write("failed to generate outputContigs\n")
     comment = "filterContigsByLengthAndCoverage, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
-    return (outputContigs, report)
+    return report
 
 def runBandage(gfaFile, details):
     imageFormat = ".svg"
@@ -1458,10 +1457,10 @@ def main():
         for line in version_text.splitlines():
             if 'Version' in line:
                 details["version"]['samtools'] = line.strip()
-        filteredContigs, filterReport = filterContigsByLengthAndCoverage(contigs, read_list, args, details)
+        filterReport = filterContigsByLengthAndCoverage(contigs, read_list, args, details)
         details['contig_filtering'] = filterReport
-        if filteredContigs:
-            contigs = filteredContigs
+        if 'good contigs file' in filterReport:
+            contigs = filterReport['good contigs file']
     if contigs and os.path.getsize(contigs):
         runQuast(contigs, args, details)
         shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
