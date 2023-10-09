@@ -62,7 +62,7 @@ def runQuast(contigsFile, args, details):
         proc.wait()
         details["version"]["quast"] = version_text
 
-def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
+def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   #, min_contig_length=300, min_contig_coverage=5, threads=1, prefix=""):
     """ 
     Write only sequences at or above min_length and min coverage to output file.
     """
@@ -77,12 +77,19 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
             if bam:
                 bamFiles.append(bam)
     if bamFiles:
+        if 'bowtie2' not in details['version']:
+            command = ["bowtie2", '--version']
+            proc = subprocess.run(command, shell=False, text=True, capture_output=True)
+            m = re.search("version\s+(\S+)", proc.stderr)
+            if m:
+                details['version']['bowtie2'] = m.group(1)
+                    
         (average_depth, shortReadDepth) = calcReadDepth(bamFiles)
         report['average depth (short reads)'] = "{:.2f}".format(average_depth)
     bamFiles = []
     for read_set in read_list:
         if read_set.length_class == 'long':
-            bam = runMinimap(inputContigs, read_set, args, outformat='bam')
+            bam = runMinimap(inputContigs, read_set, args, details, outformat='bam')
             if bam:
                 bamFiles.append(bam)
     if bamFiles:
@@ -91,7 +98,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
     report['min_contig_length_threshold'] = "%d"%args.min_contig_length
     report["min_contig_coverage_threshold"] = "%.1f"%args.min_contig_coverage
     num_good_contigs = num_bad_contigs = 0
-    suboptimalContigs = ""
+    suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
     total_seq_length = 0
     weighted_short_read_coverage = 0
     weighted_long_read_coverage = 0
@@ -99,6 +106,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
     LOG.write("writing filtered contigs to %s\n"%outputContigs)
     with open(inputContigs) as IN:
         with open(outputContigs, 'w') as OUT:
+            SUBOPT = open(os.path.join(DETAILS_DIR, suboptimalContigsFile), "w")
             seqId=None
             seq = ""
             contigIndex = 1
@@ -111,23 +119,22 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
                     if seq:
                         contigId = ">"+args.prefix+"contig_%d"%contigIndex
                         contigInfo = " length %5d"%len(seq)
-                        if len(seq) < args.min_contig_length:
-                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
-                            num_bad_contigs += 1
-                            continue
                         contigIndex += 1
                         short_read_coverage = 0
                         long_read_coverage = 0
-                        passes_coverage_threshold = False
+                        passes_thresholds = False
                         if shortReadDepth and seqId in shortReadDepth:
                             short_read_coverage, normalizedDepth = shortReadDepth[seqId]
                             contigInfo += " coverage %.01f normalized_cov %.2f"%(short_read_coverage, normalizedDepth)
-                            passes_coverage_threshold = short_read_coverage >= args.min_contig_coverage
+                            passes_thresholds = short_read_coverage >= args.min_contig_coverage
                         if longReadDepth and seqId in longReadDepth:
                             long_read_coverage, normalizedDepth = longReadDepth[seqId]
                             contigInfo += " longread_coverage %.01f normalized_longread_cov %.2f"%(long_read_coverage, normalizedDepth)
-                            passes_coverage_threshold |= long_read_coverage >= args.min_contig_coverage
-                        if passes_coverage_threshold:
+                            passes_thresholds |= long_read_coverage >= args.min_contig_coverage
+                        if len(seq) < args.min_contig_length:
+                            passes_thresholds = False
+                            num_bad_contigs += 1
+                        if passes_thresholds:
                             OUT.write(contigId+contigInfo+"\n")
                             for i in range(0, len(seq), 60):
                                 OUT.write(seq[i:i+60]+"\n")
@@ -137,11 +144,13 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
                             if long_read_coverage:
                                 weighted_long_read_coverage += long_read_coverage * len(seq)
                             total_seq_length += len(seq)
+                            if "circular=true" in line:
+                                num_circular_contigs += 1
                         else:
-                            suboptimalContigs += contigId+contigInfo+"\n"+seq+"\n"
+                            SUBOPT.write(contigId+contigInfo+"\n")
+                            for i in range(0, len(seq), 60):
+                                SUBOPT.write(seq[i:i+60]+"\n")
                             num_bad_contigs += 1
-                        if "circular=true" in line:
-                            num_circular_contigs += 1
                         seq = ""
                     if m:
                         seqId = m.group(1)
@@ -157,18 +166,15 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args):   #, min_co
     report['total length of good contigs'] = "%d"%total_seq_length
     if num_circular_contigs:
         report['contigs predicted circular'] = "%d"%num_circular_contigs
-    if suboptimalContigs:
-        suboptimalContigsFile = "contigs_below_length_coverage_threshold.fasta"
+    if num_bad_contigs:
         report["suboptimal contigs file"] = suboptimalContigsFile
-        suboptimalContigsFile = os.path.join(DETAILS_DIR, suboptimalContigsFile)
-        with open(suboptimalContigsFile, "w") as SUBOPT:
-            SUBOPT.write(suboptimalContigs)
-    if os.path.getsize(outputContigs) < 10:
-        LOG.write("failed to generate outputContigs, return None\n")
-        return None
+    if num_good_contigs:
+        report['good contigs file'] = outputContigs
+    else:
+        LOG.write("failed to generate outputContigs\n")
     comment = "filterContigsByLengthAndCoverage, input %s, output %s"%(inputContigs, outputContigs)
     LOG.write(comment+"\n")
-    return (outputContigs, report)
+    return report
 
 def runBandage(gfaFile, details):
     imageFormat = ".svg"
@@ -290,7 +296,7 @@ def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", 
     details["assembly"]["contigs.fasta file size"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runSpades(details, read_list, recipe=None, threads=4, memory=250):
+def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=250):
     LOG.write("runSpades Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime())))
     command = ["spades.py", "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -386,17 +392,12 @@ def runSpades(details, read_list, recipe=None, threads=4, memory=250):
         elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
     else:
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
-
     details["assembly"]['assembly_time'] = elapsedHumanReadable
-
     LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
+
     spadesLogFile = "spades.log"
-    try:
-        shutil.move("spades.log", os.path.join(DETAILS_DIR, spadesLogFile))
-        assemblyGraphFile = "assembly_graph.gfa"
-        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
-    except Exception as e:
-        LOG.write(str(e))
+    if os.path.exists("spades.log"):
+        shutil.move("spades.log", os.path.join(DETAILS_DIR, "spades.log"))
     if not os.path.exists(contigsFile):
         comment = "SPAdes failed to generate contigs file. Check "+spadesLogFile
         LOG.write(comment+"\n")
@@ -404,14 +405,29 @@ def runSpades(details, read_list, recipe=None, threads=4, memory=250):
         details["problem"].append(comment)
         return None
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
+    assemblyGraphFile = prefix+"assembly_graph.gfa"
+    if os.path.exists("assembly_graph_with_scaffolds.gfa"):
+        LOG.write("found gfa file: assembly_graph_with_scaffolds.gfa\n")
+        shutil.move("assembly_graph_with_scaffolds.gfa", os.path.join(DETAILS_DIR, assemblyGraphFile))
+    else:
+        gfa_candidates = glob.glob("*gfa")
+        if gfa_candidates:
+            LOG.write("found gfa file: {}\n".format(gfa_candidates[-1]))
+            shutil.move(gfa_candidates[-1], os.path.join(DETAILS_DIR, assemblyGraphFile))
     return contigsFile
 
-def runMinimap(contigFile, read_set, args, outformat='sam'):
+def runMinimap(contigFile, read_set, args, details, outformat='sam'):
     LOG.write("runMinimap: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     """
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
     """
     LOG.write("runMinimap(%s, %s, %s, %s)\n"%(contigFile, read_set.files[0], str(type(args)), outformat))
+    if 'minimap2' not in details['version']:
+        command = ["minimap2", "--version"]
+        proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, text=True)
+        proc.wait()
+        version_text = proc.stdout.read()
+        details["version"]['minimap2'] = version_text.strip()
     # index contig sequences
     #contigIndex = contigFile.replace(".fasta", ".mmi")
     #command = ["minimap2", "-t", str(threads), "-d", contigIndex, contigFile] 
@@ -504,7 +520,7 @@ def convertSamToBam(samFile, args):
     #LOG.write("samtools index return code = %d\n"%return_code)
     return bamFileSorted
 
-def runRacon(contigFile, read_set, args):
+def runRacon(contigFile, read_set, args, details):
     """
     Polish (correct) sequence of assembled contigs by comparing to the original long-read sequences
     Run racon on reads, read-to-contig-sam, contigs. Generate polished contigs.
@@ -521,7 +537,7 @@ def runRacon(contigFile, read_set, args):
         version_text = proc.stdout.read().decode()
     racon_version = version_text.strip()
 
-    readsToContigsSam = runMinimap(contigFile, read_set, args, outformat='sam')
+    readsToContigsSam = runMinimap(contigFile, read_set, args, details, outformat='sam')
     if not readsToContigsSam:
         comment = "runMinimap failed to generate sam file, exiting runRacon"
         LOG.write(comment + "\n")
@@ -641,7 +657,7 @@ def runPilon(contigFile, read_set, args, details):
     command.extend(('--threads', str(args.threads)))
     LOG.write(" ".join(command)+"\n")
     LOG.write("bamfile = {}, size={}\n".format(bamFile, os.path.getsize(bamFile)))
-    return_code = subprocess.call(command, shell=False)  #, stdout=sys.stderr, stderr=sys.stderr) #, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     LOG.write("pilon return code = %d\n"%return_code)
     pilon_time = time() - pilon_start_time
     LOG.write("pilon duration = %d\n"%(pilon_time))
@@ -1072,7 +1088,7 @@ def write_html_report(htmlFile, read_list, details):
             HTML.write("</div>\n")
         HTML.write("</section>\n")
 
-    if 'assembly' in details:
+    if 'assembly' in details and len(details['assembly']):
         HTML.write('<section>\n<h2>Assembly</h2>\n')
         HTML.write("""
         <table class="med-table kv-table">
@@ -1091,6 +1107,7 @@ def write_html_report(htmlFile, read_list, details):
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
 
+    LOG.write("details['polishing'] = {}\n".format(details['polishing']))
     if 'polishing' in details and len(details['polishing']):
         HTML.write('<section>\n<h2>Polishing</h2>\n')
         HTML.write("""
@@ -1174,7 +1191,7 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--max_bases', type=int, default=MAX_BASES, help='downsample reads if more than this total bases.')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto', 'none'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
@@ -1189,8 +1206,8 @@ def main():
     parser.add_argument('--trusted_contigs', help='for SPAdes, same-species contigs known to be good', required=False)
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
-    parser.add_argument('-t', '--threads', metavar='cores', type=int, default=4)
-    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=250, help='RAM limit in Gb')
+    parser.add_argument('-t', '--threads', metavar='cores', type=int, default=8)
+    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=125, help='RAM limit in Gb')
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--normalize', action='store_true', help='normalize read depth with BBNorm at default settings')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
@@ -1248,6 +1265,7 @@ def main():
     details['max_bases']=args.max_bases
 
     ReadLibrary.NUM_THREADS = args.threads
+    ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
     read_list = []
     if args.anonymous_reads:
@@ -1302,6 +1320,9 @@ def main():
     os.chdir(WORK_DIR)
     #LOG.write("details dir = "+DETAILS_DIR+"\n")
 
+    for read_set in read_list:
+        read_set.study_reads()
+
     if args.trim:
         for read_set in read_list:
             if read_set.length_class == "short" and read_set.format == 'fastq': # TrimGalore only works on short fastq reads
@@ -1315,32 +1336,33 @@ def main():
         for read_set in read_list:
             if read_set.num_bases > args.max_bases:
                 read_set.down_sample_reads(args.max_bases)
-    if False:
-        htmlFile = os.path.join(SAVE_DIR, "test_AssemblyReport.html")
-        write_html_report(htmlFile, read_list, details)
-        LOG.write("done with %s\n"%sys.argv[0])
-        sys.exit(1)
 
+    any_short_fasta = False
     short_reads = []
     long_reads = []
     for read_set in read_list:
         if read_set.length_class == 'short':
             short_reads.append(read_set)
+            if read_set.format == 'fasta':
+                any_short_fasta = True
         else:
             long_reads.append(read_set)
 
     if args.recipe == "auto":
         #now must decide which assembler to use
-
         LOG.write("translate auto into specific recipe\n")
         LOG.write("number of short reads = {}\n".format(len(short_reads)))
         LOG.write("number of long reads = {}\n".format(len(long_reads)))
         if len(short_reads):
-            args.recipe = "unicycler"
-            LOG.write("auto recipe using unicycler due to presence of short read data.\n")
+            if any_short_fasta:
+                args.recipe = "spades"
+                LOG.write("auto recipe selecting spades due to presence of short fasta read data.\n")
+            else:
+                args.recipe = "unicycler"
+                LOG.write("auto recipe selecting unicycler due to presence of short fastq read data.\n")
         elif len(long_reads):
             args.recipe = "flye"
-            LOG.write("auto recipe using flye due to presence of long and absence of short read data.\n")
+            LOG.write("auto recipe selecting flye due to presence of long and absence of short read data.\n")
         else:
             comment = "auto recipe failed to find short or long reads\n"
             LOG.write(comment)
@@ -1370,44 +1392,37 @@ def main():
             comment = "Because recipe is meta-spades, turning pilon and racon iterations off."
             LOG.write(comment+"\n")
             details['problem'].append(comment)
-        contigs = runSpades(details, read_list, recipe=args.recipe, threads=args.threads, memory=args.memory)
-
+        contigs = runSpades(details, read_list, prefix=args.prefix, recipe=args.recipe, threads=args.threads, memory=args.memory)
+    elif args.recipe == 'none':
+        LOG.write("recipe specified as 'none', no assembly will be performed\n")
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
     if not contigs:
-        LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")
-        LOG.write("Total time in hours = %.2f\n"%((time() - START_TIME)/3600.0))
-        LOG.write("Total time in seconds = %d\n"%((time() - START_TIME)))
-        LOG.write("contigs file not generated. Failing.\n")
-        sys.exit(1)
-    if not args.contigs:
-        main_return_code = 0
-    LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
-    if args.racon_iterations:
+        if args.contigs:
+            LOG.write("contigs supplied as {}\n".format(args.contigs))
+    if contigs:
+        LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+    if args.racon_iterations and contigs:
         # now run racon with each long-read file
-        if 'minimap2' not in details['version']:
-            command = ["minimap2", "--version"]
-            proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE)
-            proc.wait()
-            version_text = proc.stdout.read().decode()
-            details["version"]['minimap2'] = version_text.strip()
             for longReadSet in long_reads:
                 for i in range(0, args.racon_iterations):
                     LOG.write("runRacon on {}, {}, platform={}, round={}\n".format(contigs, longReadSet.files[0], longReadSet.platform, i))
-                    raconReport = runRacon(contigs, longReadSet, args) 
+                    raconReport = runRacon(contigs, longReadSet, args, details) 
                     raconContigFile = None
-                    if raconReport and 'output' in raconReport:
-                        raconContigFile = raconReport['output']
+                    if raconReport:
+                        if 'output' in raconReport:
+                            raconContigFile = raconReport['output']
                         details['polishing'].append(raconReport)
                         details['version']['racon'] = raconReport['version']
-                    if raconContigFile is not None:
+                    LOG.write("racon output = {}, report={}\n".format(raconContigFile, raconReport))
+                    if os.path.exists(raconContigFile):
                         contigs = raconContigFile
                         sys.stderr.write("contigs file is now {}\n".format(contigs))
                     else:
                         break # break out of iterating racon_iterations, go to next long-read file if any
         
-    if args.pilon_iterations and args.pilon_jar:
+    if args.pilon_iterations and args.pilon_jar and contigs:
         pilon_end_time = time() + args.pilon_hours * 60 * 60
         # now run pilon with each short-read file
         for read_set in short_reads:
@@ -1442,10 +1457,10 @@ def main():
         for line in version_text.splitlines():
             if 'Version' in line:
                 details["version"]['samtools'] = line.strip()
-        filteredContigs, filterReport = filterContigsByLengthAndCoverage(contigs, read_list, args)
+        filterReport = filterContigsByLengthAndCoverage(contigs, read_list, args, details)
         details['contig_filtering'] = filterReport
-        if filteredContigs:
-            contigs = filteredContigs
+        if 'good contigs file' in filterReport:
+            contigs = filterReport['good contigs file']
     if contigs and os.path.getsize(contigs):
         runQuast(contigs, args, details)
         shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
@@ -1461,7 +1476,7 @@ def main():
             LOG.write("Problem writing details to json: "+str(ude)+"\n")
 
 
-    htmlFile = os.path.join(SAVE_DIR, "AssemblyReport.html")
+    htmlFile = os.path.join(SAVE_DIR, args.prefix+"AssemblyReport.html")
     write_html_report(htmlFile, read_list, details)
     LOG.write("done with %s\n"%sys.argv[0])
     LOG.write(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))+"\n")

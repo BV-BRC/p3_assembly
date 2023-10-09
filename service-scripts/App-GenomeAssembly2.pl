@@ -213,6 +213,16 @@ sub assemble
     }
 
     #
+    # Normalize options.
+    #
+    # We use BBNorm here.
+    #
+    if ($params->{normalize})
+    {
+	push(@params, '--normalize');
+    }
+
+    #
     # Contig filtering options
     #
     push(@params, "--min_contig_length", $params->{min_contig_len});
@@ -235,7 +245,7 @@ sub assemble
     #
     
     my @cmd = ("p3x-assembly",
-	       "--prefix", $prefix,
+	       "--prefix", "$prefix",
 	       "--pilon_jar", $pilon,
 	       "--path-prefix", @path_additions,
 	       @params);
