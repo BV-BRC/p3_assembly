@@ -802,9 +802,9 @@ usage: canu [-version] [-citation] \
     pacbio_reads = []
     nanopore_reads = []
     for read_set in read_list:
-        if read_set.format == 'pacbio':
+        if read_set.platform == 'pacbio':
             pacbio_reads.append(read_set.files[0])
-        if read_set.format == 'nanopore':
+        if read_set.platform == 'nanopore':
             nanopore_reads.append(read_set.files[0])
     if pacbio_reads:
         command.append("-pacbio-raw")
