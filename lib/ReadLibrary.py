@@ -97,6 +97,7 @@ class ReadLibrary:
         """
         ReadLibrary.LOG.write("ReadLibrary( %s, platform=%s, interleaved=%s\n"%(file_names, str(platform), str(interleaved)))
 
+        self.num_reads = 0
         self.problem = []
         self.layout = 'na'
         self.format = 'fastq'
@@ -141,6 +142,7 @@ class ReadLibrary:
                 ReadLibrary.LOG.write(comment)
                 self.problem.append(comment)
                 raise Exception(comment)
+        self.study_reads()
 
     def store_current_version(self):
         print("store_current_version: self={}, s.v={}".format(self, self.versions))
@@ -457,7 +459,7 @@ class ReadLibrary:
 
         else:
             # keep current, unnormalized, version
-            ReadLibrary.LOG.write("bbnorm failed to normalize")
+            ReadLibrary.LOG.write("bbnorm failed to normalize\n")
             
 
         ReadLibrary.LOG.write("normalize process time: {}\n".format(time() - startTime))
