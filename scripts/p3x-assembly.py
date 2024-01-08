@@ -1267,6 +1267,9 @@ def main():
     ReadLibrary.NUM_THREADS = args.threads
     ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
+    # move into working directory so that all files are local
+    os.chdir(WORK_DIR)
+
     read_list = []
     if args.anonymous_reads:
         for item in args.anonymous_reads:
@@ -1315,13 +1318,6 @@ def main():
             else:
                 readLib = ReadLibrary(item, work_dir=WORK_DIR)
             read_list.append(readLib)
-
-    # move into working directory so that all files are local
-    os.chdir(WORK_DIR)
-    #LOG.write("details dir = "+DETAILS_DIR+"\n")
-
-    for read_set in read_list:
-        read_set.study_reads()
 
     if args.trim:
         for read_set in read_list:
@@ -1409,7 +1405,7 @@ def main():
                 for i in range(0, args.racon_iterations):
                     LOG.write("runRacon on {}, {}, platform={}, round={}\n".format(contigs, longReadSet.files[0], longReadSet.platform, i))
                     raconReport = runRacon(contigs, longReadSet, args, details) 
-                    raconContigFile = None
+                    raconContigFile = ''
                     if raconReport:
                         if 'output' in raconReport:
                             raconContigFile = raconReport['output']

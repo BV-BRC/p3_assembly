@@ -159,6 +159,13 @@
 			"default":null,
 			"desc":"Basename for the generated output files. Defaults to the basename of the input data.",
 			"type":"wsid"
-		}
+		},
+        {
+            "id": "debug_level",
+            "label": "Activate debugging messages",
+            "required": 0,
+            "default": null,
+            "type": "int"
+        }
 	]
 }
