@@ -1267,8 +1267,6 @@ def main():
     ReadLibrary.NUM_THREADS = args.threads
     ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
-    # move into working directory so that all files are local
-    os.chdir(WORK_DIR)
 
     read_list = []
     if args.anonymous_reads:
@@ -1318,6 +1316,9 @@ def main():
             else:
                 readLib = ReadLibrary(item, work_dir=WORK_DIR)
             read_list.append(readLib)
+
+    # move into working directory so that all files are local
+    os.chdir(WORK_DIR)
 
     if args.trim:
         for read_set in read_list:
