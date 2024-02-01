@@ -1320,6 +1320,9 @@ def main():
     # move into working directory so that all files are local
     os.chdir(WORK_DIR)
 
+    for read_set in read_list:
+        read_set.study_reads()
+
     if args.trim:
         for read_set in read_list:
             if read_set.length_class == "short" and read_set.format == 'fastq': # TrimGalore only works on short fastq reads
