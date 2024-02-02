@@ -142,7 +142,6 @@ class ReadLibrary:
                 ReadLibrary.LOG.write(comment)
                 self.problem.append(comment)
                 raise Exception(comment)
-        #self.study_reads()
 
     def store_current_version(self):
         print("store_current_version: self={}, s.v={}".format(self, self.versions))
