@@ -1330,7 +1330,8 @@ def main():
 
     if args.normalize:
         for read_set in read_list:
-            read_set.normalize_read_depth()
+            if read_set.platform == "illumina": #BBNorm is not recommended for nanopore or pacbio
+                read_set.normalize_read_depth()
 
     if args.max_bases:
         for read_set in read_list:
@@ -1341,7 +1342,7 @@ def main():
     short_reads = []
     long_reads = []
     for read_set in read_list:
-        if read_set.length_class == 'short':
+        if read_set.length_class == 'short' and read_set.platform in ('illumina', 'iontorrent'):
             short_reads.append(read_set)
             if read_set.format == 'fasta':
                 any_short_fasta = True

@@ -191,7 +191,7 @@
     {
       "default": 0,
       "desc": "Debugging level.",
-      "id": "debug_level",
+      "id": "debug",
       "label": "Debug level",
       "required": 0,
       "type": "int"

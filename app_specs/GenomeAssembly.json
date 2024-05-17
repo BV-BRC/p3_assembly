@@ -161,7 +161,7 @@
 			"type":"wsid"
 		},
         {
-            "id": "debug_level",
+            "id": "debug",
             "label": "Activate debugging messages",
             "required": 0,
             "default": null,
