@@ -651,9 +651,16 @@ def runPilon(contigFile, shortReadFastq, details, pilon_jar, threads=1):
     """
     LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     if not (pilon_jar and os.path.exists(pilon_jar)):
-        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
-        LOG.write(comment+"\n")
-        return
+        #
+        # Look for Ubuntu system install of pilon
+        #
+        ubuntu_pilon_jar = "/usr/share/java/pilon.jar"
+        if os.path.exists(ubuntu_pilon_jar):
+            pilon_jar = ubuntu_pilon_jar
+        else:
+            comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
+            LOG.write(comment+"\n")
+            return
 
     bamFile = runBowtie(contigFile, shortReadFastq, threads=threads, outformat='bam')
     if not (bamFile and os.path.exists(bamFile)):
