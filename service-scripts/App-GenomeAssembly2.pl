@@ -136,7 +136,7 @@ sub assemble
     my $token = $app->token();
     my $ws = $app->workspace();
 
-    my $cleanup = $params->{debug_level} > 0 ? 0 : 1;
+    my $cleanup = $params->{debug} > 0 ? 0 : 1;
 
     my $tmpdir = File::Temp->newdir( CLEANUP => $cleanup );
     print STDERR "Debug=$params->{debug_level} cleanup=$cleanup tmpdir=$tmpdir\n";
@@ -193,6 +193,7 @@ sub assemble
     push(@params, "-t", $cpu) if $cpu;
 
     my $prefix = $params->{output_file} . "_";
+    $prefix =~ tr/ /_/;
 
     push(@params, "--recipe", $params->{recipe});
 
@@ -210,6 +211,16 @@ sub assemble
     if ($params->{trim})
     {
 	push(@params, '--trim');
+    }
+
+    #
+    # Normalize options.
+    #
+    # We use BBNorm here.
+    #
+    if ($params->{normalize})
+    {
+	push(@params, '--normalize');
     }
 
     #
@@ -235,7 +246,7 @@ sub assemble
     #
     
     my @cmd = ("p3x-assembly",
-	       "--prefix", $prefix,
+	       "--prefix", "$prefix",
 	       "--pilon_jar", $pilon,
 	       "--path-prefix", @path_additions,
 	       @params);

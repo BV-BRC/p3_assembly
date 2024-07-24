@@ -141,6 +141,14 @@
       "type": "boolean"
     },
     {
+      "default": false,
+      "desc": "Normalize reads using BBNorm before assembly",
+      "id": "normalize",
+      "label": "normalize_reads",
+      "required": 0,
+      "type": "boolean"
+    },
+    {
       "default": 300,
       "desc": "Filter out short contigs in final assembly",
       "id": "min_contig_len",
@@ -183,7 +191,7 @@
     {
       "default": 0,
       "desc": "Debugging level.",
-      "id": "debug_level",
+      "id": "debug",
       "label": "Debug level",
       "required": 0,
       "type": "int"
