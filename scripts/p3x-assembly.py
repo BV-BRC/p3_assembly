@@ -1268,6 +1268,10 @@ def main():
     ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
 
+    if (args.pilon_iterations and not os.path.exists(args.pilon_jar)):
+        sys.stderr.write("pilon was requested but pilon jar file: {}, not found. Failing.".format(args.pilon_jar))
+        return main_return_code
+
     read_list = []
     if args.anonymous_reads:
         for item in args.anonymous_reads:
