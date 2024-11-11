@@ -593,7 +593,7 @@ def runBowtie(contigFile, read_set, args, outformat='bam'):
     LOG.write("bowtie2-build return code = %d\n"%return_code)
     if return_code != 0:
         LOG.write("bowtie2-build failed\n")
-        return None, None
+        return None
 
     fastqBase = read_set.files[0]
     fastqBase = re.sub(r"\..*", "", fastqBase)
@@ -1450,9 +1450,9 @@ def main():
                     else:
                         sys.stderr.write("expected contigs file {} does not exist\n".format(contigs))
                         #break
-            # check number of changes in most recent round, quit if zero
-            if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
-                break
+                # check number of changes in most recent round, quit if zero
+                if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+                    break
             
     if contigs and os.path.getsize(contigs):
         command = ["samtools"]
