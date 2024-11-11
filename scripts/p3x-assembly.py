@@ -1450,9 +1450,9 @@ def main():
                     else:
                         sys.stderr.write("expected contigs file {} does not exist\n".format(contigs))
                         #break
-            # check number of changes in most recent round, quit if zero
-            if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
-                break
+                # check number of changes in most recent round, quit if zero
+                if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+                    break
             
     if contigs and os.path.getsize(contigs):
         command = ["samtools"]
