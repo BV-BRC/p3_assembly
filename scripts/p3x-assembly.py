@@ -593,7 +593,7 @@ def runBowtie(contigFile, read_set, args, outformat='bam'):
     LOG.write("bowtie2-build return code = %d\n"%return_code)
     if return_code != 0:
         LOG.write("bowtie2-build failed\n")
-        return None, None
+        return None
 
     fastqBase = read_set.files[0]
     fastqBase = re.sub(r"\..*", "", fastqBase)
