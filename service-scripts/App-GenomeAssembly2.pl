@@ -236,6 +236,13 @@ sub assemble
 	push(@params, '--normalize');
     }
 
+    # We use filtlong here.
+    #
+    if ($params->{filtlong})
+    {
+	push(@params, '--filtlong');
+    }
+
     #
     # Contig filtering options
     #

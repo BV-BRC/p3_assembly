@@ -31,8 +31,9 @@ It can perform 'polishing' using Pilon (for Illumina) or Racon (for pacbio or na
 TODO: properly handle different kinds of pacbio reads
 """
 
-DEFAULT_GENOME_SIZE = "5m"
-MAX_BASES=5e9
+DEFAULT_GENOME_SIZE = 5000000
+DEFAULT_MAX_BASES=1e10 # this is 2000X coverage for a 5M genome
+DEFAULT_MEMORY_GIGABYTES = 128
 LOG = None # create a log file at start of main()
 START_TIME = None
 WORK_DIR = None
@@ -296,7 +297,7 @@ def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", 
     details["assembly"]["contigs.fasta file size"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=250):
+def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=DEFAULT_MEMORY_GIGABYTES):
     LOG.write("runSpades Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime())))
     command = ["spades.py", "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -473,6 +474,7 @@ def convertSamToBam(samFile, args):
     proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
     proc.wait()
     version_text = proc.stderr.read().decode()
+    samtools_version = ''
     for line in version_text.splitlines():
         if 'Version' in line:
             samtools_version = line.strip()
@@ -768,7 +770,7 @@ def calcReadDepth(bamfiles):
         readDepth[c][1] = normalizedDepth
     return (totalMeanDepth, readDepth)
 
-def runCanu(details, read_list, canu_exec="canu", threads=1, genome_size="5m", memory=250, prefix=""):
+def runCanu(details, read_list, canu_exec="canu", threads=1, genome_size=DEFAULT_GENOME_SIZE, memory=DEFAULT_MEMORY_GIGABYTES, prefix=""):
     LOG.write("runCanu: Tiime = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     canuStartTime = time()
     comment = """
@@ -792,7 +794,7 @@ usage: canu [-version] [-citation] \
     details['assembly']['assembler'] = 'canu'
     p.wait()
 
-    command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%s"%genome_size]
+    command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%d"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
     if "1.7" in canu_version:
         # special handling for this version
@@ -861,7 +863,7 @@ usage: canu [-version] [-citation] \
     details["assembly"]["contigs.fasta size:"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runFlye(details, read_list, flye_exec="flye", threads=1, genome_size="5m", prefix=""):
+def runFlye(details, read_list, recipe="flye", threads=1, genome_size=DEFAULT_GENOME_SIZE, prefix="flye_", memory=128):
     LOG.write("runFlye: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     flyeStartTime = time()
     comment = """
@@ -892,12 +894,16 @@ usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
         if read_set.platform == 'nanopore':
             nanopore_reads.append(read_set.files[0])
     command = ['flye', "--out-dir", '.', "--genome-size", str(genome_size), '--threads', str(threads)]
+    if recipe == 'meta-flye':
+        command.append("--meta")
     if pacbio_reads:
         command.append("--pacbio-raw")
         command.extend(pacbio_reads)
     elif nanopore_reads:
         command.append("--nano-raw")
         command.extend(nanopore_reads)
+    #if memory:
+    #    command.extend(['-str(memory)+"g")
     LOG.write(" ".join(command)+"\n")
     if not pacbio_reads + nanopore_reads:
         LOG.write("no long read files available for flye.\n")
@@ -1189,9 +1195,9 @@ def main():
     parser.add_argument('--fasta', metavar='files', nargs='*', help='list of fasta[.gz] files', required=False, default=[])
     parser.add_argument('--sra', metavar='files', nargs='*', help='list of SRA run accessions (e.g. SRR5070677), will be downloaded from NCBI', required=False)
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
-    parser.add_argument('--max_bases', type=int, default=MAX_BASES, help='downsample reads if more than this total bases.')
+    parser.add_argument('--max_bases', type=int, default=DEFAULT_MAX_BASES, help='downsample reads if more than this (per read set).')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto', 'none'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'meta-flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto', 'none'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
@@ -1199,7 +1205,7 @@ def main():
     parser.add_argument('--pilon_iterations', type=int, default=0, help='number of times to run pilon per short-read file', required=False)
     parser.add_argument('--pilon_hours', type=float, default=6.0, help='maximum hours to run pilon', required=False)
     parser.add_argument('--prefix', default='', help='prefix for output files', required=False)
-    parser.add_argument('--genome_size', metavar='k, m, or g', default=DEFAULT_GENOME_SIZE, help='genome size for canu: e.g. 300k or 5m or 1.1g', required=False)
+    parser.add_argument('--genome_size', metavar='base pairs', type=int, default=DEFAULT_GENOME_SIZE, help='genome size for canu or flye, eg 5000000', required=False)
     parser.add_argument('--min_contig_length', type=int, default=300, help='save contigs of this length or longer', required=False)
     parser.add_argument('--min_contig_coverage', type=float, default=5, help='save contigs of this coverage or deeper', required=False)
     #parser.add_argument('--fasta', nargs='*', help='list of fasta files "," between libraries', required=False)
@@ -1207,9 +1213,12 @@ def main():
     parser.add_argument('--no_pilon', action='store_true', help='for unicycler', required=False)
     parser.add_argument('--untrusted_contigs', help='for SPAdes, same-species contigs used gap closure and repeat resolution', required=False)
     parser.add_argument('-t', '--threads', metavar='cores', type=int, default=8)
-    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=125, help='RAM limit in Gb')
+    parser.add_argument('-m', '--memory', metavar='GB', type=int, default=DEFAULT_MEMORY_GIGABYTES, help='RAM limit in Gb')
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--normalize', action='store_true', help='normalize read depth with BBNorm at default settings')
+    parser.add_argument('--filtlong', action='store_true', help='filter long reads on quality, length and a proxy for accuracy using filtlong')
+    parser.add_argument('--targetDepth', type=int, default=100, help='downsample to this approx. coverage')
+    parser.add_argument('--filtlong_pct', type=int, default=90, help='pct long reads to keep after filtering on quality, length and accuracy using filtlong')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
     parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
     parser.add_argument('--spades_for_unicycler', help='path to spades.py suitable for unicycler')
@@ -1327,31 +1336,41 @@ def main():
     for read_set in read_list:
         read_set.study_reads()
 
-    if args.trim:
-        for read_set in read_list:
-            if read_set.length_class == "short" and read_set.format == 'fastq': # TrimGalore only works on short fastq reads
-                read_set.trim_short_reads()
-
-    if args.normalize:
-        for read_set in read_list:
-            if read_set.platform == "illumina": #BBNorm is not recommended for nanopore or pacbio
-                read_set.normalize_read_depth()
-
-    if args.max_bases:
-        for read_set in read_list:
-            if read_set.num_bases > args.max_bases:
-                read_set.down_sample_reads(args.max_bases)
-
     any_short_fasta = False
     short_reads = []
     long_reads = []
     for read_set in read_list:
-        if read_set.length_class == 'short' and read_set.platform in ('illumina', 'iontorrent'):
+        if read_set.length_class == 'short':
             short_reads.append(read_set)
             if read_set.format == 'fasta':
                 any_short_fasta = True
         else:
             long_reads.append(read_set)
+
+    if args.trim:
+        for read_set in short_reads:
+            if read_set.format == 'fastq': # TrimGalore only works on short fastq reads
+                read_set.trim_short_reads()
+
+    if args.normalize:
+        for read_set in short_reads:
+            read_set.normalize_read_depth(target_depth = args.targetDepth)
+
+    if args.filtlong and len(long_reads):
+        LOG.write(f"args.filtlong is set")
+        illumina_reference = None
+        for read_set in short_reads:
+            if len(read_set.files) > 1:
+                illumina_reference = read_set
+                LOG.write(f"selected illumina reference for filtlong: {illumina_reference}\n")
+        for read_set in long_reads:
+            target_bases = args.genome_size * args.targetDepth
+            read_set.filter_long_reads(target_bases, illumina_reference, args.filtlong_pct)
+
+    if args.max_bases:
+        for read_set in read_list:
+            if read_set.num_bases > (args.max_bases * 1.01): # a little grace to avoid re-down-sampling unnecessarily
+                read_set.down_sample_reads(args.max_bases)
 
     if args.recipe == "auto":
         #now must decide which assembler to use
@@ -1387,8 +1406,8 @@ def main():
     elif args.recipe == "canu":
         contigs = runCanu(details, read_list, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
 
-    elif args.recipe == "flye":
-        contigs = runFlye(details, read_list, threads=args.threads, genome_size=args.genome_size, prefix=args.prefix)
+    elif "flye" in args.recipe:
+        contigs = runFlye(details, read_list, recipe=args.recipe, threads=args.threads, genome_size=args.genome_size, prefix=args.prefix)
 
     elif "spades" in args.recipe or args.recipe == "single-cell":
         if args.recipe == "meta-spades" and (args.pilon_iterations or args.racon_iterations):
@@ -1451,7 +1470,7 @@ def main():
                         sys.stderr.write("expected contigs file {} does not exist\n".format(contigs))
                         #break
                 # check number of changes in most recent round, quit if zero
-                if 'num_changes' in details['polishing'][-1] and details['polishing'][-1]['num_changes'] == 0:
+                if details['polishing'] and ('num_changes' in details['polishing'][-1]) and (details['polishing'][-1]['num_changes'] == 0):
                     break
             
     if contigs and os.path.getsize(contigs):
