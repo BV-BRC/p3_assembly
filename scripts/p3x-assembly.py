@@ -1217,7 +1217,7 @@ def main():
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
     parser.add_argument('--normalize', action='store_true', help='normalize read depth with BBNorm at default settings')
     parser.add_argument('--filtlong', action='store_true', help='filter long reads on quality, length and a proxy for accuracy using filtlong')
-    parser.add_argument('--targetDepth', type=int, default=100, help='downsample to this approx. coverage')
+    parser.add_argument('--target_depth', type=int, default=200, help='downsample to this approx. coverage')
     parser.add_argument('--filtlong_pct', type=int, default=90, help='pct long reads to keep after filtering on quality, length and accuracy using filtlong')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
     parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
@@ -1354,7 +1354,7 @@ def main():
 
     if args.normalize:
         for read_set in short_reads:
-            read_set.normalize_read_depth(target_depth = args.targetDepth)
+            read_set.normalize_read_depth(target_depth = args.target_depth)
 
     if args.filtlong and len(long_reads):
         LOG.write(f"args.filtlong is set")
@@ -1364,7 +1364,7 @@ def main():
                 illumina_reference = read_set
                 LOG.write(f"selected illumina reference for filtlong: {illumina_reference}\n")
         for read_set in long_reads:
-            target_bases = args.genome_size * args.targetDepth
+            target_bases = args.genome_size * args.target_depth
             read_set.filter_long_reads(target_bases, illumina_reference, args.filtlong_pct)
 
     if args.max_bases:
