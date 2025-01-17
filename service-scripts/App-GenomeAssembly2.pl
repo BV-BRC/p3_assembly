@@ -243,6 +243,13 @@ sub assemble
 	push(@params, '--filtlong');
     }
 
+    # Target depth for down-sampling by bbnorm and/or filtlong
+    #
+    if ($params->{target_depth})
+    {
+	push(@params, '--target_depth', $params->{target_depth});
+    }
+
     #
     # Contig filtering options
     #
