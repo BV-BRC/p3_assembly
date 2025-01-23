@@ -236,6 +236,20 @@ sub assemble
 	push(@params, '--normalize');
     }
 
+    # We use filtlong here.
+    #
+    if ($params->{filtlong})
+    {
+	push(@params, '--filtlong');
+    }
+
+    # Target depth for down-sampling by bbnorm and/or filtlong
+    #
+    if ($params->{target_depth})
+    {
+	push(@params, '--target_depth', $params->{target_depth});
+    }
+
     #
     # Contig filtering options
     #
