@@ -794,12 +794,11 @@ usage: canu [-version] [-citation] \
     details['assembly']['assembler'] = 'canu'
     p.wait()
 
-    command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%d"%genome_size]
+    command = [canu_exec, "-d", '.', "-p", "canu", "genomeSize=%d"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
     if "1.7" in canu_version:
         # special handling for this version
         command.append("gnuplotTested=true")
-    command.append("stopOnReadQuality=false")
     
     pacbio_reads = []
     nanopore_reads = []
@@ -809,10 +808,10 @@ usage: canu [-version] [-citation] \
         if read_set.platform == 'nanopore':
             nanopore_reads.append(read_set.files[0])
     if pacbio_reads:
-        command.append("-pacbio-raw")
+        command.append("-pacbio")
         command.extend(pacbio_reads)
     if nanopore_reads:
-        command.append("-nanopore-raw")
+        command.append("-nanopore")
         command.extend(nanopore_reads)
     if not len(pacbio_reads) + len(nanopore_reads):
         LOG.write("no long read files available for canu.\n")
