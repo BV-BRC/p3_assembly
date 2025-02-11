@@ -808,10 +808,10 @@ usage: canu [-version] [-citation] \
         if read_set.platform == 'nanopore':
             nanopore_reads.append(read_set.files[0])
     if pacbio_reads:
-        command.append("-pacbio")
+        command.append("-pacbio-raw")
         command.extend(pacbio_reads)
     if nanopore_reads:
-        command.append("-nanopore")
+        command.append("-nanopore-raw")
         command.extend(nanopore_reads)
     if not len(pacbio_reads) + len(nanopore_reads):
         LOG.write("no long read files available for canu.\n")
@@ -821,9 +821,7 @@ usage: canu [-version] [-citation] \
     LOG.flush()
 
     canuStartTime = time()
-    #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-    with open(os.path.join(DETAILS_DIR, prefix+"canu_stdout.txt"), 'w') as CANU_STDOUT: 
-        return_code = subprocess.call(command, shell=False, stdout=CANU_STDOUT, stderr=CANU_STDOUT)
+    return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
