@@ -794,12 +794,11 @@ usage: canu [-version] [-citation] \
     details['assembly']['assembler'] = 'canu'
     p.wait()
 
-    command = [canu_exec, "-d", '.', "-p", "canu", "useGrid=false", "genomeSize=%d"%genome_size]
+    command = [canu_exec, "-d", '.', "-p", "canu", "genomeSize=%d"%genome_size]
     command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
     if "1.7" in canu_version:
         # special handling for this version
         command.append("gnuplotTested=true")
-    command.append("stopOnReadQuality=false")
     
     pacbio_reads = []
     nanopore_reads = []
@@ -822,9 +821,7 @@ usage: canu [-version] [-citation] \
     LOG.flush()
 
     canuStartTime = time()
-    #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-    with open(os.path.join(DETAILS_DIR, prefix+"canu_stdout.txt"), 'w') as CANU_STDOUT: 
-        return_code = subprocess.call(command, shell=False, stdout=CANU_STDOUT, stderr=CANU_STDOUT)
+    return_code = subprocess.call(command, shell=False)
     LOG.write("return code = %d\n"%return_code)
     canuEndTime = time()
     elapsedTime = canuEndTime - canuStartTime
