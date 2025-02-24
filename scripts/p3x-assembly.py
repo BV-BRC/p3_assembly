@@ -1334,7 +1334,7 @@ def main():
     for read_set in read_list:
         read_set.study_reads()
 
-    constrain_total_bases(read_set, args.max_bases)
+    constrain_total_bases(read_list, args.max_bases)
 
     any_short_fasta = False
     short_reads = []

@@ -40,11 +40,11 @@ def constrain_total_bases(read_library_list, total_bases_limit):
     if total_bases < total_bases_limit:
         ReadLibrary.LOG.write("total bases is within limit")
         return
-    proportion_to_sample = total_bases/total_bases_limit
+    proportion_to_sample = total_bases_limit/total_bases
     ReadLibrary.LOG.write(f"need to down-sample each library to {(100*proportion_to_sample):.2} percent to keep total bases under {total_bases_limit}\n")
     for library in read_library_list:
-        num_bases_to_save = proportion_to_sample * library.num_bases
-        library.down_sample(num_bases_to_save)
+        num_bases_to_save = int(proportion_to_sample * library.num_bases)
+        library.down_sample_reads(num_bases_to_save)
     ReadLibrary.LOG.write(f"constrain_total_bases complete")
 
 def inferPlatform(read_id, maxReadLength, avgReadQuality):
@@ -565,7 +565,7 @@ class ReadLibrary:
         read file over size limit, down-sample using seqtk or filtlong
         """
         startTime = time()
-        ReadLibrary.LOG.write("down_sample_reads()\n")
+        ReadLibrary.LOG.write(f"down_sample_reads({max_bases})\n")
         self.store_current_version()
         comment = ''
 
@@ -597,7 +597,8 @@ class ReadLibrary:
             if self.length_class == 'long':
                 command = ['filtlong', '--target_bases', str(max_bases), read_file] 
             else:
-                command = ['seqtk', 'sample', read_file, '{:.3f}'.format(prop_to_sample)] 
+                #command = ['seqtk', 'sample', read_file, '{:.3f}'.format(prop_to_sample)] 
+                command = ['seqtk', 'sample', '-2', read_file, str(max_bases)]
             ReadLibrary.LOG.write("downsample, command line = "+" ".join(command)+"\n")
             self.command = " ".join(command)+"\n"
             proc = subprocess.Popen(command, shell=False, stdout=out_fh)
