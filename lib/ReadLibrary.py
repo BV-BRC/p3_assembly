@@ -12,6 +12,41 @@ import shutil
 import copy
 from time import time, localtime, strftime, sleep
 
+def capture_filtlong_version():
+    if not 'filtlong' in ReadLibrary.program_version:
+        proc = subprocess.run("filtlong --version", shell=True, capture_output=True, text=True)
+        ReadLibrary.program_version['filtlong'] = proc.stdout.strip()
+
+def capture_seqtk_version():
+    if not 'seqtk' in ReadLibrary.program_version:
+        proc = subprocess.run("seqtk", capture_output=True, text=True)
+        for line in proc.stderr.split("\n"):
+            m = re.match("Version:\s*(\S.*\S)", line)
+            if m:
+                seqtk_version = m.group(1)
+                ReadLibrary.program_version['seqtk'] = seqtk_version
+                break
+
+def constrain_total_bases(read_library_list, total_bases_limit):
+    # apply the experiment-wide limit to set of reads
+    # sample each library proportionally so total is capped to limit
+    ReadLibrary.LOG.write(f"constrain_total_bases of {len(read_library_list)} input libraries to {total_bases_limit}\n")
+    total_bases = 0
+    for library in read_library_list:
+        if not library.num_bases:
+            library.study_reads()
+        total_bases += library.num_bases
+    ReadLibrary.LOG.write(f"total bases over {len(read_library_list)} input libraries is {total_bases}\n")
+    if total_bases < total_bases_limit:
+        ReadLibrary.LOG.write("total bases is within limit")
+        return
+    proportion_to_sample = total_bases/total_bases_limit
+    ReadLibrary.LOG.write(f"need to down-sample each library to {(100*proportion_to_sample):.2} percent to keep total bases under {total_bases_limit}\n")
+    for library in read_library_list:
+        num_bases_to_save = proportion_to_sample * library.num_bases
+        library.down_sample(num_bases_to_save)
+    ReadLibrary.LOG.write(f"constrain_total_bases complete")
+
 def inferPlatform(read_id, maxReadLength, avgReadQuality):
     """ 
     Analyze sample of text from read file and return one of:
@@ -98,6 +133,7 @@ class ReadLibrary:
         ReadLibrary.LOG.write("ReadLibrary( %s, platform=%s, interleaved=%s\n"%(file_names, str(platform), str(interleaved)))
 
         self.num_reads = 0
+        self.num_bases = 0
         self.problem = []
         self.layout = 'na'
         self.format = 'fastq'
@@ -266,6 +302,7 @@ class ReadLibrary:
 
         file1 = self.files[0]
         file2 = None
+        F1 = F2 = None
         if not os.path.exists(file1):
             print("file {} does not exist".format(file1))
             print("cur dir = {}".format(os.getcwd()))
@@ -525,37 +562,24 @@ class ReadLibrary:
 
     def down_sample_reads(self, max_bases=MAX_BASES):
         """
-        read file over size limit, down-sample using seqtk
+        read file over size limit, down-sample using seqtk or filtlong
         """
         startTime = time()
         ReadLibrary.LOG.write("down_sample_reads()\n")
         self.store_current_version()
         comment = ''
-        if self.length_class == 'long':
-            suffix = "_filtlong.fq"
-            comment = f"down-sample reads using filtlong to approximately {max_bases} bases"
-            proc = subprocess.run("filtlong --version", shell=True, capture_output=True, text=True)
-            ReadLibrary.program_version['filtlong'] = proc.stdout.strip()
-        else:
-            prop_to_sample = float(max_bases) / self.num_bases
-            if prop_to_sample > 1:
-                ReadLibrary.LOG.write("down_sample_reads calculated prop_to_sample to be over 1 ({})".format(prop_to_sample))
-                return
-            comment = "down-sample by {:.3f}X to approximately {} bases using seqtk".format(prop_to_sample, max_bases)
-
-            suffix = "_sampled.fq"
-            proc = subprocess.run("seqtk", capture_output=True, text=True)
-            for line in proc.stderr.split("\n"):
-                m = re.match("Version:\s*(\S.*\S)", line)
-                if m:
-                    seqtk_version = m.group(1)
-                    ReadLibrary.program_version['seqtk'] = seqtk_version
-                    break
 
         self.transformation = comment
         self.command = ''
         ReadLibrary.LOG.write(comment+"\n")
         ReadLibrary.LOG.write("files = "+", ".join(self.files)+"\n")
+        if self.length_class == 'long':
+            suffix = "_filtlong.fastq"
+            capture_filtlong_version()# capture version of program
+        else:
+            suffix = "_sampled.fastq"
+            prop_to_sample = self.num_bases / max_bases
+            capture_seqtk_version()# capture version of program
 
         for i, read_file in enumerate(self.files):
             out_file = os.path.basename(read_file) # will write to current working directory
