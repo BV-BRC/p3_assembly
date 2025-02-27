@@ -2,16 +2,14 @@
 import sys
 import subprocess
 import argparse
-import gzip
-import bz2
 import os
 import os.path
 import re
 import shutil
-try:
-    import urllib.request as urllib2 # python3
-except ImportError:
-    import urllib2 #python2
+#try:
+#    import urllib.request as urllib2 # python3
+#except ImportError:
+#    import urllib2 #python2
 from time import time, localtime, strftime
 import json
 import glob
@@ -87,7 +85,8 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
                 details['version']['bowtie2'] = m.group(1)
                     
         (average_depth, shortReadDepth) = calcReadDepth(bamFiles)
-        report['average depth (short reads)'] = "{:.2f}".format(average_depth)
+        #report['average depth (short reads)'] = "{:.2f}".format(average_depth)
+        # there are two calculations of read coverage depth, redundant but slightly different
     bamFiles = []
     for read_set in read_list:
         if read_set.length_class == 'long':
@@ -96,7 +95,8 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
                 bamFiles.append(bam)
     if bamFiles:
         (average_depth, longReadDepth) = calcReadDepth(bamFiles)
-        report['average depth (long reads)'] = "{:.2f}".format(average_depth)
+        #report['average depth (long reads)'] = "{:.2f}".format(average_depth)
+        # there are two calculations of read coverage depth, redundant but slightly different
     report['min_contig_length_threshold'] = "%d"%args.min_contig_length
     report["min_contig_coverage_threshold"] = "%.1f"%args.min_contig_coverage
     num_good_contigs = num_bad_contigs = 0
@@ -1353,11 +1353,12 @@ def main():
                 read_set.trim_short_reads()
 
     if args.normalize:
+        LOG.write(f"args.normalize is set\n")
         for read_set in short_reads:
             read_set.normalize_read_depth(target_depth = args.target_depth)
 
-    if args.filtlong and len(long_reads):
-        LOG.write(f"args.filtlong is set")
+    if args.filtlong and len(long_reads) and args.target_depth:
+        LOG.write(f"args.filtlong is set\n")
         illumina_reference = None
         for read_set in short_reads:
             if len(read_set.files) > 1:
@@ -1366,11 +1367,6 @@ def main():
         for read_set in long_reads:
             target_bases = args.genome_size * args.target_depth
             read_set.filter_long_reads(target_bases, illumina_reference, args.filtlong_pct)
-
-    if args.max_bases:
-        for read_set in read_list:
-            if read_set.num_bases > (args.max_bases * 1.01): # a little grace to avoid re-down-sampling unnecessarily
-                read_set.down_sample_reads(args.max_bases)
 
     if args.recipe == "auto":
         #now must decide which assembler to use
@@ -1392,6 +1388,13 @@ def main():
             LOG.write(comment)
             raise Exception(comment)
 
+    if "meta" in args.recipe: # meta-spades or meta-flye
+        args.pilon_iterations = 0
+        args.racon_iterations = 0
+        comment = "Because recipe is for metagenome, turning pilon and racon iterations off."
+        LOG.write(comment+"\n")
+        details['problem'].append(comment)
+
     contigs = ""
     if args.recipe == "unicycler":
         spades_exec = None
@@ -1410,12 +1413,6 @@ def main():
         contigs = runFlye(details, read_list, recipe=args.recipe, threads=args.threads, genome_size=args.genome_size, prefix=args.prefix)
 
     elif "spades" in args.recipe or args.recipe == "single-cell":
-        if args.recipe == "meta-spades" and (args.pilon_iterations or args.racon_iterations):
-            args.pilon_iterations = 0
-            args.racon_iterations = 0
-            comment = "Because recipe is meta-spades, turning pilon and racon iterations off."
-            LOG.write(comment+"\n")
-            details['problem'].append(comment)
         contigs = runSpades(details, read_list, prefix=args.prefix, recipe=args.recipe, threads=args.threads, memory=args.memory)
     elif args.recipe == 'none':
         LOG.write("recipe specified as 'none', no assembly will be performed\n")

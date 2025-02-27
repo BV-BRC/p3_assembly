@@ -41,7 +41,7 @@ def constrain_total_bases(read_library_list, total_bases_limit):
         ReadLibrary.LOG.write("total bases is within limit")
         return
     proportion_to_sample = total_bases_limit/total_bases
-    ReadLibrary.LOG.write(f"need to down-sample each library to {(100*proportion_to_sample):.2} percent to keep total bases under {total_bases_limit}\n")
+    ReadLibrary.LOG.write(f"need to down-sample each library to {(100*proportion_to_sample):.3} percent to keep total bases under {total_bases_limit}\n")
     for library in read_library_list:
         num_bases_to_save = int(proportion_to_sample * library.num_bases)
         library.down_sample_reads(num_bases_to_save)
