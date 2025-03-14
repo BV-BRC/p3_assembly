@@ -6,10 +6,6 @@ import os
 import os.path
 import re
 import shutil
-#try:
-#    import urllib.request as urllib2 # python3
-#except ImportError:
-#    import urllib2 #python2
 from time import time, localtime, strftime
 import json
 import glob
@@ -163,6 +159,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, args, details):   
             report['average short read coverage'] = "%.3f"%(weighted_short_read_coverage / total_seq_length)
         if weighted_long_read_coverage:
             report['average long read coverage'] = "%.3f"%(weighted_long_read_coverage / total_seq_length)
+    report['total contigs'] = "%d"%(num_good_contigs+num_bad_contigs)
     report['num contigs above thresholds'] = "%d"%num_good_contigs
     report['num contigs below thresholds'] = "%d"%num_bad_contigs
     report['total length of good contigs'] = "%d"%total_seq_length
@@ -207,6 +204,50 @@ def runBandage(gfaFile, details):
             details['problem'].append(comment)
     return retval
 
+def runMegahit(details, read_list, prefix, threads=4, memoryGB=16):
+    LOG.write("runMegahit\n")
+    proc = subprocess.Popen(["megahit", "--version"], shell=False, stdout=subprocess.PIPE)
+    version_text = proc.stdout.read().decode()
+    if version_text:
+        m = re.search(r"MEGAHIT\s+\S+", version_text, flags=re.IGNORECASE)
+        if m:
+            version_text = m.group(0) # entire match
+    proc.wait()
+    details["assembly"]['assembler'] = 'megahit'
+    details["assembly"]['version'] = version_text
+    details["version"]["megahit"] = version_text
+
+    memoryBytes = memoryGB * 1024 * 1024 *1024
+    command = ["megahit", "-t", str(threads), '-m', str(memoryBytes)]
+
+    for read_set in read_list:
+        if read_set.length_class == 'short':
+            if len(read_set.files) > 1:
+                command.extend(("-1", read_set.files[0], "-2", read_set.files[1]))
+            else:
+                command.extend(("--read", read_set.files[0]))
+
+    LOG.write(" ".join(command)+"\n")
+    LOG.flush()
+    startTime = time()
+    details["assembly"]['command_line'] = " ".join(command)
+    proc = subprocess.run(command, shell=False)
+    proc.check_returncode()
+    #LOG.write("return code = %d\n"%return_code)
+
+    if os.path.exists("megahit_out/log"):
+        megahitLogFile = prefix+"megahit.log"
+        shutil.move("megahit_out/log", os.path.join(DETAILS_DIR, megahitLogFile))
+
+    if os.path.exists("megahit_out/final.contigs.fa"):
+        shutil.move("megahit_out/final.contigs.fa", "contigs.fasta") #rename to canonical name
+    else:
+        comment = "megahit failed to generate assembly file. Check "+unicyclerLogFile
+        LOG.write(comment+"\n")
+        sys.exit(1)
+    details["assembly"]["contigs.fasta file size"] = os.path.getsize("contigs.fasta")
+    return "contigs.fasta"
+
 def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", spades_exec=None):
     LOG.write("runUnicycler: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     proc = subprocess.Popen(["unicycler", "--version"], shell=False, stdout=subprocess.PIPE)
@@ -241,7 +282,6 @@ def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", 
 
     LOG.write(" ".join(command)+"\n")
     LOG.flush()
-    unicyclerStartTime = time()
     details["assembly"]['command_line'] = " ".join(command)
     with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
         return_code = subprocess.call(command, shell=False, stdout=FNULL)
@@ -260,21 +300,6 @@ def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", 
         with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big and unicycle.log is better
             return_code = subprocess.call(command, shell=False, stdout=FNULL)
         LOG.write("return code = %d\n"%return_code)
-
-    unicyclerEndTime = time()
-    elapsedTime = unicyclerEndTime - unicyclerStartTime
-    elapsedHumanReadable = ""
-    if elapsedTime < 60:
-        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
-    elif elapsedTime < 3600:
-        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
-    else:
-        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
-
-    details["assembly"]['assembly_time'] = elapsedHumanReadable
-    details["assembly"]['assembly_seconds'] = elapsedTime
-
-    LOG.write("Duration of Unicycler run was %s\n"%(elapsedHumanReadable))
 
     unicyclerLogFile = "unicycler.log"
     if os.path.exists("unicycler.log"):
@@ -298,7 +323,7 @@ def runUnicycler(details, read_list, threads=1, min_contig_length=0, prefix="", 
     details["assembly"]["contigs.fasta file size"] = os.path.getsize(contigsFile)
     return contigsFile
 
-def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=DEFAULT_MEMORY_GIGABYTES):
+def runSpades(details, read_list, prefix="", recipe=None, threads=4, memoryGB=DEFAULT_MEMORY_GIGABYTES):
     LOG.write("runSpades Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime())))
     command = ["spades.py", "--version"]
     proc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -364,7 +389,6 @@ def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=DEFA
     LOG.write("SPAdes command =\n"+" ".join(command)+"\n")
     #LOG.write("    PATH:  "+os.environ["PATH"]+"\n\n")
     LOG.flush()
-    spadesStartTime = time()
 
     details['assembly']['command_line'] = " ".join(command)
     return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -384,18 +408,6 @@ def runSpades(details, read_list, prefix="", recipe=None, threads=4, memory=DEFA
         details['assembly']['command_line'] = " ".join(command)
         return_code = subprocess.call(command, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         LOG.write("return code = %d\n"%return_code)
-
-    spadesEndTime = time()
-    elapsedTime = spadesEndTime - spadesStartTime
-    elapsedHumanReadable = ""
-    if elapsedTime < 60:
-        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
-    elif elapsedTime < 3600:
-        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
-    else:
-        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
-    details["assembly"]['assembly_time'] = elapsedHumanReadable
-    LOG.write("Duration of SPAdes run was %s\n"%(elapsedHumanReadable))
 
     spadesLogFile = "spades.log"
     if os.path.exists("spades.log"):
@@ -773,7 +785,6 @@ def calcReadDepth(bamfiles):
 
 def runCanu(details, read_list, canu_exec="canu", threads=1, genome_size=DEFAULT_GENOME_SIZE, memory=DEFAULT_MEMORY_GIGABYTES, prefix=""):
     LOG.write("runCanu: Tiime = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
-    canuStartTime = time()
     comment = """
 usage: canu [-version] [-citation] \
             [-correct | -trim | -assemble | -trim-assemble] \
@@ -821,23 +832,6 @@ usage: canu [-version] [-citation] \
     LOG.write("canu command =\n"+" ".join(command)+"\n")
     LOG.flush()
 
-    canuStartTime = time()
-    return_code = subprocess.call(command, shell=False)
-    LOG.write("return code = %d\n"%return_code)
-    canuEndTime = time()
-    elapsedTime = canuEndTime - canuStartTime
-    elapsedHumanReadable = ""
-    if elapsedTime < 60:
-        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
-    elif elapsedTime < 3600:
-        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
-    else:
-        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
-
-    details["assembly"]['elapsed_time'] = elapsedHumanReadable
-    details["assembly"]['command_line'] = " ".join(command)
-
-    LOG.write("Duration of canu run was %s\n"%(elapsedHumanReadable))
     if os.path.exists("canu.report"):
         LOG.write("details_dir = %s\n"%DETAILS_DIR)
         LOG.write("canu_report file name = %s\n"%(prefix+"canu_report.txt"))
@@ -863,7 +857,6 @@ usage: canu [-version] [-citation] \
 
 def runFlye(details, read_list, recipe="flye", threads=1, genome_size=DEFAULT_GENOME_SIZE, prefix="flye_", memory=128):
     LOG.write("runFlye: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
-    flyeStartTime = time()
     comment = """
 usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
     --nano-corr | --nano-hq ) file1 [file_2 ...]
@@ -908,22 +901,6 @@ usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
         details["problem"].append("no long read files available for flye")
         return None
 
-    flyeStartTime = time()
-    #with open(os.devnull, 'w') as FNULL: # send stdout to dev/null, it is too big
-    with open(os.path.join(DETAILS_DIR, prefix+"flye_stdout.txt"), 'w') as FLYE_STDOUT: 
-        return_code = subprocess.call(command, shell=False, stdout=FLYE_STDOUT, stderr=FLYE_STDOUT)
-    LOG.write("return code = %d\n"%return_code)
-    flyeEndTime = time()
-    elapsedTime = flyeEndTime - flyeStartTime
-    elapsedHumanReadable = ""
-    if elapsedTime < 60:
-        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
-    elif elapsedTime < 3600:
-        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
-    else:
-        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
-
-    details["assembly"]['elapsed_time'] = elapsedHumanReadable
     details["assembly"]['command_line'] = " ".join(command)
 
     LOG.write("Duration of flye run was %s\n"%(elapsedHumanReadable))
@@ -1159,7 +1136,7 @@ def write_html_report(htmlFile, read_list, details):
     
     HTML.write('<div>\n<h2>Preprocessing of Reads</h2>\n')
     for read_set in read_list:
-        read_set.writeHtmlSection(HTML)
+        read_set.writeHtml(HTML)
     HTML.write("</div>\n")
 
     HTML.write("<section><h2>Tools Used:</h2>\n")
@@ -1195,7 +1172,7 @@ def main():
     parser.add_argument('--anonymous_reads', metavar='files', nargs='*', help='unspecified read files, types automatically inferred.')
     parser.add_argument('--max_bases', type=int, default=DEFAULT_MAX_BASES, help='downsample reads if more than this (per read set).')
     parser.add_argument('--interleaved', nargs='*', help='list of fastq files which are interleaved pairs')
-    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'meta-flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'auto', 'none'], help='assembler to use', default='auto')
+    parser.add_argument('--recipe', choices=['unicycler', 'flye', 'meta-flye', 'canu', 'spades', 'meta-spades', 'plasmid-spades', 'single-cell', 'rna-spades', 'megahit', 'auto', 'none'], help='assembler to use', default='auto')
     parser.add_argument('--contigs', metavar='fasta', help='perform polishing on existing assembly')
     #parser.add_argument('--only-assembler', action='store true', help='omit spades read error correction')
     
@@ -1213,14 +1190,14 @@ def main():
     parser.add_argument('-t', '--threads', metavar='cores', type=int, default=8)
     parser.add_argument('-m', '--memory', metavar='GB', type=int, default=DEFAULT_MEMORY_GIGABYTES, help='RAM limit in Gb')
     parser.add_argument('--trim', action='store_true', help='trim reads with trim_galore at default settings')
-    parser.add_argument('--normalize', action='store_true', help='normalize read depth with BBNorm at default settings')
-    parser.add_argument('--filtlong', action='store_true', help='filter long reads on quality, length and a proxy for accuracy using filtlong')
+    parser.add_argument('--normalize', action='store_true', help='normalize read depth to target depth with BBNorm')
+    parser.add_argument('--filtlong', action='store_true', help='filter long reads to target depth using filtlong')
     parser.add_argument('--target_depth', type=int, default=200, help='downsample to this approx. coverage')
-    parser.add_argument('--filtlong_pct', type=int, default=90, help='pct long reads to keep after filtering on quality, length and accuracy using filtlong')
     parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
     parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
     parser.add_argument('--spades_for_unicycler', help='path to spades.py suitable for unicycler')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
+    parser.add_argument('--maxContigsForBandage', type=int, default=100, help='only generage Bandage for this or fewer contigs')
     parser.add_argument('--params_json', help='JSON file with additional information.')
     parser.add_argument('--path_prefix', '--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
     parser.add_argument('-v', '--verbose', action='store_true', help="Output more progress information.", required=False)
@@ -1269,7 +1246,6 @@ def main():
     details["polishing"] = []
     details["version"] = {}
     details["problem"] = []
-    details['max_bases']=args.max_bases
 
     ReadLibrary.NUM_THREADS = args.threads
     ReadLibrary.MEMORY = args.memory  # in GB
@@ -1366,7 +1342,8 @@ def main():
                 LOG.write(f"selected illumina reference for filtlong: {illumina_reference}\n")
         for read_set in long_reads:
             target_bases = args.genome_size * args.target_depth
-            read_set.filter_long_reads(target_bases, illumina_reference, args.filtlong_pct)
+            if target_bases < read_set.num_bases:
+                read_set.filter_long_reads(target_bases, illumina_reference)
 
     if args.recipe == "auto":
         #now must decide which assembler to use
@@ -1396,16 +1373,12 @@ def main():
         details['problem'].append(comment)
 
     contigs = ""
+    startTime = time()
     if args.recipe == "unicycler":
         spades_exec = None
         if (args.spades_for_unicycler):
             spades_exec = args.spades_for_unicycler
         contigs = runUnicycler(details, read_list, threads=args.threads, min_contig_length=args.min_contig_length, prefix=args.prefix, spades_exec=spades_exec )
-        if not contigs:
-            comment = "unicycler failed to generate contigs"
-            LOG.write(comment+"\n")
-            details['problem'].append(comment)
-
     elif args.recipe == "canu":
         contigs = runCanu(details, read_list, canu_exec=args.canu_exec, threads=args.threads, genome_size=args.genome_size, memory=args.memory, prefix=args.prefix)
 
@@ -1414,16 +1387,32 @@ def main():
 
     elif "spades" in args.recipe or args.recipe == "single-cell":
         contigs = runSpades(details, read_list, prefix=args.prefix, recipe=args.recipe, threads=args.threads, memory=args.memory)
+    elif args.recipe == 'megahit':
+        contigs = runMegahit(details, read_list, prefix=args.prefix, threads=args.threads, memoryGB=args.memory)
     elif args.recipe == 'none':
         LOG.write("recipe specified as 'none', no assembly will be performed\n")
     else:
         LOG.write("cannot interpret args.recipe: "+args.recipe)
 
+    elapsedTime = time() - startTime
+    elapsedHumanReadable = ""
+    if elapsedTime < 60:
+        elapsedHumanReadable = "%.1f minutes"%(elapsedTime/60.0)
+    elif elapsedTime < 3600:
+        elapsedHumanReadable = "%.2f hours"%(elapsedTime/3600.0)
+    else:
+        elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
+
+    details["assembly"]['assembly_time'] = elapsedHumanReadable
+    details["assembly"]['assembly seconds'] = int(elapsedTime)
+
     if not contigs:
-        if args.contigs:
-            LOG.write("contigs supplied as {}\n".format(args.contigs))
-    if contigs:
+        comment = "assembly failed to generate contigs"
+        LOG.write(comment+"\n")
+        sys.exit(1) # signal job failure
+    else:
         LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
+
     if args.racon_iterations and contigs:
         # now run racon with each long-read file
             for longReadSet in long_reads:
@@ -1482,13 +1471,14 @@ def main():
         details['contig_filtering'] = filterReport
         if 'good contigs file' in filterReport:
             contigs = filterReport['good contigs file']
-    if contigs and os.path.getsize(contigs):
-        runQuast(contigs, args, details)
-        shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
+        if contigs and os.path.getsize(contigs):
+            runQuast(contigs, args, details)
+            shutil.move(contigs, os.path.join(SAVE_DIR, args.prefix+"contigs.fasta"))
 
-    gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
-    if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
-        runBandage(gfaFile, details)
+        gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
+        if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
+            if 'total contigs' in filterReport and int(filterReport['total contigs']) <= args.maxContigsForBandage:
+                runBandage(gfaFile, details)
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         try:
