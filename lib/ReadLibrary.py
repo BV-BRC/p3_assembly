@@ -32,19 +32,41 @@ def constrain_total_bases(read_library_list, total_bases_limit):
     # sample each library proportionally so total is capped to limit
     ReadLibrary.LOG.write(f"constrain_total_bases of {len(read_library_list)} input libraries to {total_bases_limit}\n")
     total_bases = 0
+    long_read_bases = 0
+    short_read_bases = 0
     for library in read_library_list:
         if not library.num_bases:
             library.study_reads()
         total_bases += library.num_bases
+        if library.length_class == 'short':
+            short_read_bases += library.num_bases
+        else:
+            long_read_bases += library.num_bases
     ReadLibrary.LOG.write(f"total bases over {len(read_library_list)} input libraries is {total_bases}\n")
     if total_bases < total_bases_limit:
         ReadLibrary.LOG.write("total bases is within limit")
         return
-    proportion_to_sample = total_bases_limit/total_bases
-    ReadLibrary.LOG.write(f"need to down-sample each library to {(100*proportion_to_sample):.3} percent to keep total bases under {total_bases_limit}\n")
+    proportion_to_sample_short = 1
+    proportion_to_sample_long = 1
+    if short_read_bases < (total_bases_limit/2):
+        proportion_to_sample_long = (total_bases_limit - short_read_bases)/long_read_bases
+        ReadLibrary.LOG.write(f"need to down-sample long reads to {(100*proportion_to_sample_long):.3} percent to keep total bases under {total_bases_limit}\n")
+    elif long_read_bases < (total_bases_limit/2):
+        proportion_to_sample_short = (total_bases_limit - long_read_bases)/short_read_bases
+        ReadLibrary.LOG.write(f"need to down-sample short reads to {(100*proportion_to_sample_short):.3} percent to keep total bases under {total_bases_limit}\n")
+    else:
+        proportion_to_sample_short = total_bases_limit / (2 * short_read_bases)
+        proportion_to_sample_long = total_bases_limit / (2 * long_read_bases)
+        ReadLibrary.LOG.write(f"need to down-sample long reads to {(100*proportion_to_sample_long):.3} percent to keep total bases under {total_bases_limit}\n")
+        ReadLibrary.LOG.write(f"need to down-sample short reads to {(100*proportion_to_sample_short):.3} percent to keep total bases under {total_bases_limit}\n")
+
+    #proportion_to_sample = total_bases_limit/total_bases
     for library in read_library_list:
-        library.down_sample_reads(proportion_to_sample)
-    ReadLibrary.LOG.write(f"constrain_total_bases complete\n")
+        if library.length_class == 'short' and (proportion_to_sample_short < 1):
+            library.down_sample_reads(proportion_to_sample_short)
+        elif library.length_class == 'long' and (proportion_to_sample_long < 1):
+            library.down_sample_reads(proportion_to_sample_long)
+    ReadLibrary.LOG.write(f"\nconstrain_total_bases complete\n")
 
 def inferPlatform(read_id, maxReadLength, avgReadQuality):
     """ 
@@ -533,7 +555,7 @@ class ReadLibrary:
         comment = ''
 
         self.command = ''
-        self.transformation ='downsample large readset'
+        self.transformation =f'downsample readset to {int(proportion_to_sample*100)}%'
         ReadLibrary.LOG.write(comment+"\n")
         ReadLibrary.LOG.write("files = "+", ".join(self.files)+"\n")
         if self.length_class == 'long':
@@ -596,5 +618,5 @@ class ReadLibrary:
             HTML.write("<td>{:.1f}</td>".format(read_version.avg_length))
             HTML.write("</tr>\n")
             if hasattr(read_version, 'command'):
-                HTML.write(f"<tr><td></td><td>Command</td><td colspan=4><small>{read_version.command}</small></td></tr>\n")
+                HTML.write(f"<tr><td></td><td>Command</td><td colspan=4 class='code'><small>{read_version.command}</small></td></tr>\n")
         HTML.write("</tbody></table>\n")
