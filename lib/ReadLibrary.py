@@ -12,55 +12,78 @@ import shutil
 import copy
 from time import time, localtime, strftime, sleep
 
+def capture_filtlong_version():
+    if not 'filtlong' in ReadLibrary.program_version:
+        proc = subprocess.run("filtlong --version", shell=True, capture_output=True, text=True)
+        ReadLibrary.program_version['filtlong'] = proc.stdout.strip()
+
+def capture_seqtk_version():
+    if not 'seqtk' in ReadLibrary.program_version:
+        proc = subprocess.run("seqtk", capture_output=True, text=True)
+        for line in proc.stderr.split("\n"):
+            m = re.match("Version:\s*(\S.*\S)", line)
+            if m:
+                seqtk_version = m.group(1)
+                ReadLibrary.program_version['seqtk'] = seqtk_version
+                break
+
+def constrain_total_bases(read_library_list, total_bases_limit):
+    # apply the experiment-wide limit to set of reads
+    # sample each library proportionally so total is capped to limit
+    ReadLibrary.LOG.write(f"constrain_total_bases of {len(read_library_list)} input libraries to {total_bases_limit}\n")
+    total_bases = 0
+    long_read_bases = 0
+    short_read_bases = 0
+    for library in read_library_list:
+        if not library.num_bases:
+            library.study_reads()
+        total_bases += library.num_bases
+        if library.length_class == 'short':
+            short_read_bases += library.num_bases
+        else:
+            long_read_bases += library.num_bases
+    ReadLibrary.LOG.write(f"total bases over {len(read_library_list)} input libraries is {total_bases}\n")
+    if total_bases < total_bases_limit:
+        ReadLibrary.LOG.write("total bases is within limit")
+        return
+    proportion_to_sample_short = 1
+    proportion_to_sample_long = 1
+    if short_read_bases < (total_bases_limit/2):
+        proportion_to_sample_long = (total_bases_limit - short_read_bases)/long_read_bases
+        ReadLibrary.LOG.write(f"need to down-sample long reads to {(100*proportion_to_sample_long):.3} percent to keep total bases under {total_bases_limit}\n")
+    elif long_read_bases < (total_bases_limit/2):
+        proportion_to_sample_short = (total_bases_limit - long_read_bases)/short_read_bases
+        ReadLibrary.LOG.write(f"need to down-sample short reads to {(100*proportion_to_sample_short):.3} percent to keep total bases under {total_bases_limit}\n")
+    else:
+        proportion_to_sample_short = total_bases_limit / (2 * short_read_bases)
+        proportion_to_sample_long = total_bases_limit / (2 * long_read_bases)
+        ReadLibrary.LOG.write(f"need to down-sample long reads to {(100*proportion_to_sample_long):.3} percent to keep total bases under {total_bases_limit}\n")
+        ReadLibrary.LOG.write(f"need to down-sample short reads to {(100*proportion_to_sample_short):.3} percent to keep total bases under {total_bases_limit}\n")
+
+    #proportion_to_sample = total_bases_limit/total_bases
+    for library in read_library_list:
+        if library.length_class == 'short' and (proportion_to_sample_short < 1):
+            library.down_sample_reads(proportion_to_sample_short)
+        elif library.length_class == 'long' and (proportion_to_sample_long < 1):
+            library.down_sample_reads(proportion_to_sample_long)
+    ReadLibrary.LOG.write(f"\nconstrain_total_bases complete\n")
+
 def inferPlatform(read_id, maxReadLength, avgReadQuality):
     """ 
     Analyze sample of text from read file and return one of:
-    illumina, iontorrent, pacbio, nanopore, ...
-    going by patterns listed here: https://www.ncbi.nlm.nih.gov/sra/docs/submitformats/#platform-specific-fastq-files
-    these patterns need to be refined and tested
+    illumina, pacbio, nanopore, fasta
     """
+    if read_id.startswith(">"):
+        return "fasta"
     if maxReadLength < ReadLibrary.MAX_SHORT_READ_LENGTH:
-        # example illumina read id
-        #@D00553R:173:HG53VBCXY:2:1101:1235:2074 1:N:0:ACAGTGAT
-        if read_id.startswith(">"):
-            return "fasta"
-        parts = read_id.split(":")
-        if re.match(r"@[A-Z]\S+:\d+:\S+:\d+:\d+:\d+:\d+ \S+:\S+:\S+:\S+$", read_id):
-            return "illumina" # newer illumina
-        if re.match(r"@\S+:\S+:\S+:\S+:\S+#\S+/\S+$", read_id):
-            return "illumina" # older illumina
-        if re.match(r"@[^:]+:[^:]+:[^:]+$", read_id):
-            return "iontorrent" # 
-        if re.match(r"@[SED]RR\d+\.\d+", read_id):
-            return "illumina" # default short fastq type 
-        if len(parts) > 4:
-            return "illumina"
-        if len(parts) == 3:
-            return "iontorrent"
+        return "illumina" # default short fastq type 
     else: # one of the long read types (pacbio or nanopore)
-        if read_id.startswith(">"):
-            return "nanopore"
         if avgReadQuality > 11 and avgReadQuality < 31:
             sys.stderr.write("inferring platform is nanopore from quality: {:.4f}\n".format(avgReadQuality))
             return "nanopore"
         else:
             sys.stderr.write("inferring platform is pacbio from quality: {:.4f}\n".format(avgReadQuality))
             return "pacbio"
-        # todo: need to distinguish between PacBio CSS data types and pass to SPAdes appropriately
-        dash_delimited_fields = read_id.split("-")
-        if len(dash_delimited_fields) == 5:
-            return "nanopore" # based on user data
-        if re.match(r"@\S+/\S+/\S+_\S+$", read_id): #@<MovieName> /<ZMW_number>/<subread-start>_<subread-end> :this is CCS Subread
-            return "pacbio" # 
-        if re.match(r"@\S+/\S+$", read_id): #@<MovieName>/<ZMW_number> 
-            return "pacbio" # 
-    #@d5edc711-3388-4510-ace0-5d39d0d70e19 runid=999acb6b58d1c399244c42f88902c6e5eeb3cacf read=10 ch=446 start_time=2017-10-24T17:33:18Z
-        if re.match(r"@[a-z0-9-]+\s+runid=\S+\s+read=\d+\s+ch=", read_id): #based on one example, need to test more 
-            return "nanopore" # 
-        return "pacbio" # default long fastq type
-    # if we get here, we failed to recognize what read type it is, default to illumina
-    sys.stderr.write("inferPlatform defaulting to 'illumina'\n")
-    return "illumina"
 
 def findSingleDifference(s1, s2):
     # if two strings differ in only a single contiguous region, return the start and end of region, else return None
@@ -98,6 +121,7 @@ class ReadLibrary:
         ReadLibrary.LOG.write("ReadLibrary( %s, platform=%s, interleaved=%s\n"%(file_names, str(platform), str(interleaved)))
 
         self.num_reads = 0
+        self.num_bases = 0
         self.problem = []
         self.layout = 'na'
         self.format = 'fastq'
@@ -112,7 +136,6 @@ class ReadLibrary:
                 self.length_class = 'long'
 
         self.transformation ='original'
-        self.versions = []
         self.files = []
         input_files = []
         ReadLibrary.LOG.write("read files passed to constructor: {}, type={}\n".format(file_names, type(file_names)))
@@ -147,7 +170,6 @@ class ReadLibrary:
         print("store_current_version: self={}, s.v={}".format(self, self.versions))
         current_version = copy.deepcopy(self)
         self.versions.append(current_version)
-        print("cv={}, s.v={}".format(current_version, self.versions))
 
     def bunzip_reads(self):
         ReadLibrary.LOG.write("bunzip_reads()\n")
@@ -198,7 +220,6 @@ class ReadLibrary:
             command.append(self.files[0])
 
         ReadLibrary.LOG.write("command: "+" ".join(command)+"\n")
-        self.command = command
         proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE, text=True)
         trimGaloreStderr = proc.stderr.read()
         return_code = proc.wait()
@@ -217,8 +238,9 @@ class ReadLibrary:
                 self.file_size[i] = os.path.getsize(new_read_file)
                 self.files[i] = new_read_file
 
+            self.command = ' '.join(command)
             self.study_reads()
-            self.transformation = "trim-galore"
+            self.transformation = "trim reads"
 
             report_files = glob.glob(trim_directory +'/*trimming_report.txt')
             if report_files:
@@ -237,13 +259,6 @@ class ReadLibrary:
         self.processing_time = time() - startTime
         ReadLibrary.LOG.write("trim_short_reads duration: {}\n".format(self.processing_time))
         return
-
-    def saveTrimReport(self, save_dir):
-        pass
-        #for name in sorted(self.read_set):
-        #    for read_version in self.read_set[name]['versions']:
-        #        if 'trim report' in read_version:
-        #            shutil.copy(read_version['trim report'], save_dir)
 
     def study_reads(self):
         """
@@ -266,6 +281,7 @@ class ReadLibrary:
 
         file1 = self.files[0]
         file2 = None
+        F1 = F2 = None
         if not os.path.exists(file1):
             print("file {} does not exist".format(file1))
             print("cur dir = {}".format(os.getcwd()))
@@ -282,14 +298,21 @@ class ReadLibrary:
             F1 = gzip.open(file1, 'rt')
             if file2:
                 F2 = gzip.open(file2, 'rt')
-        elif file1.endswith("bz2"):
-            F1 = bz2.BZ2File(file1, 'rt')
-            if file2:
-                F2 = bz2.BZ2File(file2, 'rt')
         else:
-            F1 = open(file1, 'rt')
-            if file2:
-                F2 = open(file2, 'rt')
+            # use the 'file' builtin of the shell to see if it is gzipped
+            result = subprocess.run(f"file `readlink -f {file1}`", shell=True, capture_output = True, text=True)
+            file_type = result.stdout.split(":")[-1]
+            if re.search("gzip compressed", file_type):
+                ReadLibrary.LOG.write(f"testing file type yields: {file_type}\n")
+                ReadLibrary.LOG.write(f"file {file1} appears to be in gzip format\n")
+                F1 = gzip.open(file1, 'rt')
+                if file2:
+                    F2 = gzip.open(file2, 'rt')
+
+            else:
+                F1 = open(file1, 'rt')
+                if file2:
+                    F2 = open(file2, 'rt')
 
         line = str(F1.readline().rstrip())
         ReadLibrary.LOG.write("in study_reads, first line of {} is {}\n".format(file1, line))
@@ -365,8 +388,6 @@ class ReadLibrary:
         avgReadLength = 0
         if readNumber:
             avgReadLength = totalReadLength/readNumber
-        if file2:
-            avgReadLength/=2
         avgReadQuality = 0
         if numQualityPositionsSampled:
             avgReadQuality = sumQuality / float(numQualityPositionsSampled)
@@ -444,7 +465,6 @@ class ReadLibrary:
         command.extend(['threads={}'.format(ReadLibrary.NUM_THREADS), '-Xmx{:.0f}g'.format(ReadLibrary.MEMORY * 0.85)])
 
         ReadLibrary.LOG.write("normalize, command line = "+" ".join(command)+"\n")
-        self.command = " ".join(command)
         proc = subprocess.Popen(command, shell=False, stderr=bbnorm_fh)
         proc.wait()
         bbnorm_fh.close()
@@ -456,8 +476,8 @@ class ReadLibrary:
             if file2:
                 self.files[1] = out_file2
             self.study_reads()    
-            comment = "normalize read depth using BBNorm"
-            self.transformation=comment
+            self.transformation = 'normalize to target depth'
+            self.command = " ".join(command)
             self.process_time = time() - startTime
 
             proc = subprocess.run("bbnorm.sh", capture_output=True, text=True)
@@ -476,12 +496,16 @@ class ReadLibrary:
         ReadLibrary.LOG.write("normalize process time: {}\n".format(time() - startTime))
         return
 
-    def filter_long_reads(self, target_bases, illumina_reads=None, keep_percent=0.95):
+    def filter_long_reads(self, target_bases, illumina_reads=None):
         """
         use filtlong to downsample long reads based on quality and kmer-matches to illlumina (proxy for accuracy)
         """
-        startTime = time()
         ReadLibrary.LOG.write(f"filter_long_reads()\nreference = {illumina_reads}\n")
+        if self.num_bases < target_bases:
+            ReadLibrary.LOG.write(f" number of bases ({self.num_bases}) is already below target_bases ({target_bases}), skipping.\n")
+            return 0
+
+        startTime = time()
         self.store_current_version()
 
         if not self.length_class == 'long':
@@ -490,9 +514,7 @@ class ReadLibrary:
         proc = subprocess.run("filtlong --version", shell=True, capture_output=True, text=True)
         ReadLibrary.program_version['filtlong'] = proc.stdout.strip()
 
-        self.transformation = f"filter long reads on quality and length"
-        if illumina_reads:
-            self.transformation += f" using kmers shared with {illumina_reads} as a proxy for quality"
+        self.transformation = f"filter reads to target depth"
         ReadLibrary.LOG.write(self.transformation+"\n")
         ReadLibrary.LOG.write("files = "+", ".join(self.files)+"\n")
         read_file = self.files[0]
@@ -509,7 +531,7 @@ class ReadLibrary:
         
         out_fh = open(out_file, 'w')
 
-        command = ['filtlong', '--target_bases', str(target_bases), '--keep_percent', str(keep_percent)] 
+        command = ['filtlong', '--target_bases', str(target_bases)] 
         if illumina_reads:
             command.extend(['--illumina_1', illumina_reads.files[0]])
             command.extend(['--illumina_2', illumina_reads.files[1]])
@@ -523,40 +545,27 @@ class ReadLibrary:
         self.study_reads()
         ReadLibrary.LOG.write("after: files = "+", ".join(self.files)+"\n")
 
-    def down_sample_reads(self, max_bases=MAX_BASES):
+    def down_sample_reads(self, proportion_to_sample):
         """
-        read file over size limit, down-sample using seqtk
+        read file over size limit, down-sample using seqtk or filtlong
         """
         startTime = time()
-        ReadLibrary.LOG.write("down_sample_reads()\n")
+        ReadLibrary.LOG.write(f"down_sample_reads({proportion_to_sample})\n")
         self.store_current_version()
         comment = ''
-        if self.length_class == 'long':
-            suffix = "_filtlong.fq"
-            comment = f"down-sample reads using filtlong to approximately {max_bases} bases"
-            proc = subprocess.run("filtlong --version", shell=True, capture_output=True, text=True)
-            ReadLibrary.program_version['filtlong'] = proc.stdout.strip()
-        else:
-            prop_to_sample = float(max_bases) / self.num_bases
-            if prop_to_sample > 1:
-                ReadLibrary.LOG.write("down_sample_reads calculated prop_to_sample to be over 1 ({})".format(prop_to_sample))
-                return
-            comment = "down-sample by {:.3f}X to approximately {} bases using seqtk".format(prop_to_sample, max_bases)
 
-            suffix = "_sampled.fq"
-            proc = subprocess.run("seqtk", capture_output=True, text=True)
-            for line in proc.stderr.split("\n"):
-                m = re.match("Version:\s*(\S.*\S)", line)
-                if m:
-                    seqtk_version = m.group(1)
-                    ReadLibrary.program_version['seqtk'] = seqtk_version
-                    break
-
-        self.transformation = comment
         self.command = ''
+        self.transformation =f'downsample readset to {int(proportion_to_sample*100)}%'
         ReadLibrary.LOG.write(comment+"\n")
         ReadLibrary.LOG.write("files = "+", ".join(self.files)+"\n")
+        if self.length_class == 'long':
+            suffix = "_filtlong.fastq"
+            capture_filtlong_version()# capture version of program
+        else:
+            suffix = "_sampled.fastq"
+            capture_seqtk_version()# capture version of program
 
+        self.command = ''
         for i, read_file in enumerate(self.files):
             out_file = os.path.basename(read_file) # will write to current working directory
             if out_file.endswith("gz"):
@@ -571,11 +580,14 @@ class ReadLibrary:
             
             out_fh = open(out_file, 'w')
             if self.length_class == 'long':
-                command = ['filtlong', '--target_bases', str(max_bases), read_file] 
+                num_bases_to_save = int(proportion_to_sample * self.num_bases)
+                command = ['filtlong', '--target_bases', str(num_bases_to_save), read_file] 
             else:
-                command = ['seqtk', 'sample', read_file, '{:.3f}'.format(prop_to_sample)] 
+                #command = ['seqtk', 'sample', read_file, '{:.3f}'.format(prop_to_sample)] 
+                num_reads_to_save = int(proportion_to_sample * self.num_reads / len(self.files))
+                command = ['seqtk', 'sample', '-2', read_file, str(num_reads_to_save)]
             ReadLibrary.LOG.write("downsample, command line = "+" ".join(command)+"\n")
-            self.command = " ".join(command)+"\n"
+            self.command += " ".join(command)+"\n"
             proc = subprocess.Popen(command, shell=False, stdout=out_fh)
             proc.wait()
             out_fh.close()
@@ -587,14 +599,10 @@ class ReadLibrary:
         ReadLibrary.LOG.write("duration of down_sample_reads and study_reads: %d seconds\n"%(time() - startTime))
         return
     
-    def writeHtmlSection(self, HTML):
+    def writeHtml(self, HTML):
         versions = list(self.versions)
         versions.append(self)
-        print("versions = {}".format(versions))
-        print("self.versions = {}".format(self.versions))
-        #versions.reverse()
-        print("versions = {}".format(versions))
-        #HTML.write("<p>"+name+"</p><br>\n")
+        #print("versions = {}".format(versions))
         HTML.write("""
         <table class="med-table kv-table">
             <thead class="table-header">
@@ -602,7 +610,6 @@ class ReadLibrary:
             <tbody>
             """)
         for i, read_version in enumerate(versions):
-            print("html for {}".format(read_version))
             HTML.write("<tr><td>{}</td>".format(i))
             HTML.write("<td>{}</td>".format(read_version.transformation))
             HTML.write("<td>{}</td>".format(" ".join(read_version.files)))
@@ -610,4 +617,6 @@ class ReadLibrary:
             HTML.write("<td>{:.2f}</td>".format(read_version.num_bases / 1e6))
             HTML.write("<td>{:.1f}</td>".format(read_version.avg_length))
             HTML.write("</tr>\n")
+            if hasattr(read_version, 'command'):
+                HTML.write(f"<tr><td></td><td>Command</td><td colspan=4 class='code'><small>{read_version.command}</small></td></tr>\n")
         HTML.write("</tbody></table>\n")

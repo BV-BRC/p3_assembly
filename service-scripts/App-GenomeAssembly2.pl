@@ -216,6 +216,14 @@ sub assemble
     push(@params, "--racon_iterations", $params->{racon_iter});
     push(@params, "--pilon_iterations", $params->{pilon_iter});
 
+    # 
+    # Limit maximum allowed bases across all read files
+    #
+    if ($params->{max_bases})
+    {
+	push(@params, '--max_bases', $params->{max_bases});
+    }
+
     #
     # Trimming options.
     #
@@ -258,7 +266,8 @@ sub assemble
      push(@params, "--min_contig_coverage", $params->{min_contig_cov});
 
     #
-    # Genome size; only used for canu
+    # Genome size; used as parameter for canu and flye
+    # also used for filtlong downsampling to target_depth multiple of estimated genome size
     #
     push(@params, "--genome_size", $params->{genome_size});
 
@@ -266,6 +275,7 @@ sub assemble
     # Request bandage plots
     #
     push(@params, "--bandage");
+    push(@params, "--maxContigsForBandage", 100); # bandage plots of assemblies with too many contigs are not helpful
 
     #
     # We change directory to $asm_out since p3x-assembly

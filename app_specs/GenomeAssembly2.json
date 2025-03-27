@@ -99,17 +99,27 @@
       "type": "string"
     },
     {
+      "id": "max_bases",
+      "default": 10000000000,
+      "desc": "Maximum bases across all input read files triggering downsampling.",
+      "label": "Maximum bases",
+      "required": 0,
+      "type": "int"
+    },
+    {
       "default": "auto",
       "desc": "Recipe used for assembly",
       "enum": [
         "auto",
         "unicycler",
-	"flye",
+	    "flye",
+	    "meta-flye",
         "canu",
         "spades",
         "meta-spades",
         "plasmid-spades",
-        "single-cell"
+        "single-cell",
+        "megahit"
       ],
       "id": "recipe",
       "label": "Assembly recipe",
@@ -165,6 +175,14 @@
       "type": "boolean"
     },
     {
+      "default": 5000000,
+      "desc": "Estimated genome size (used for canu and flye and filtlong)",
+      "id": "genome_size",
+      "label": "Genome Size",
+      "required": 0,
+      "type": "int"
+    },
+    {
       "default": 300,
       "desc": "Filter out short contigs in final assembly",
       "id": "min_contig_len",
@@ -179,14 +197,6 @@
       "label": "Minimal output contig coverage",
       "required": 0,
       "type": "float"
-    },
-    {
-      "default": 5000000,
-      "desc": "Estimated genome size (used for canu and flye and filtlong)",
-      "id": "genome_size",
-      "label": "Genome Size",
-      "required": 0,
-      "type": "int"
     },
     {
       "default": null,
