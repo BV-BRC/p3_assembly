@@ -77,6 +77,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, min_contig_length=
             bowtieReport = runBowtie(inputContigs, read_set, num_threads, outformat='bam')
             if 'bam' in bowtieReport:
                 bamFiles.append(bowtieReport['bam'])
+                report['bowtie2_version'] = bowtieReport['version']
     if bamFiles:
         (average_depth, shortReadDepth) = calcReadDepth(bamFiles)
         report['average depth (short reads)'] = "{:.2f}".format(average_depth)
@@ -87,6 +88,7 @@ def filterContigsByLengthAndCoverage(inputContigs, read_list, min_contig_length=
             minimapReport = runMinimap(inputContigs, read_set, num_threads, outformat='bam')
             if 'bam' in minimapReport:
                 bamFiles.append(minimapReport['bam'])
+                report['minimap_version'] = minimapReport['version']
     if bamFiles:
         (average_depth, longReadDepth) = calcReadDepth(bamFiles)
         report['average depth (long reads)'] = "{:.2f}".format(average_depth)
@@ -567,8 +569,9 @@ def runMinimap(contigFile, read_set, num_threads, outformat='sam'):
     report['sam'] = contigSam
 
     if outformat == 'bam':
-        contigBam = convertSamToBam(contigSam, num_threads)
+        (contigBam, samtools_version) = convertSamToBam(contigSam, num_threads)
         report['bam'] = contigBam
+        report['samtools_version'] = samtools_version
     return report
             
 def runBowtie(contigFile, read_set, num_threads, outformat='bam'):
@@ -618,9 +621,10 @@ def runBowtie(contigFile, read_set, num_threads, outformat='bam'):
     report['command'] = ' '.join(command)
     report['sam'] = samFile
     if outformat == 'bam':
-        contigsBam = convertSamToBam(samFile, num_threads)
+        (contigsBam, samtools_version) = convertSamToBam(samFile, num_threads)
         LOG.write('got bam file %s\n'%contigsBam)
         report['bam'] = contigsBam
+        report['samtools_version'] = samtools_version
     return report
 
 def convertSamToBam(samFile, num_threads):
@@ -676,7 +680,7 @@ def convertSamToBam(samFile, num_threads):
     LOG.write("executing: "+" ".join(command)+"\n")
     return_code = subprocess.call(command, shell=False, stderr=LOG)
     #LOG.write("samtools index return code = %d\n"%return_code)
-    return bamFileSorted
+    return (bamFileSorted, samtools_version)
 
 def runRacon(contigFile, read_set, num_threads):
     """
@@ -735,7 +739,7 @@ def runRacon(contigFile, read_set, num_threads):
     report['output'] = raconContigs
     comment = "racon, input %s, output %s"%(contigFile, raconContigs)
     LOG.write(comment+"\n")
-    os.remove(contigFile) #delete old one
+    #os.remove(contigFile) #delete old one
     return report
 
 def runPilon(contigFile, read_set, num_threads, pilon_jar):
@@ -750,6 +754,9 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar):
         LOG.write(comment+"\n")
         return None
     bowtieReport = runBowtie(contigFile, read_set, num_threads, outformat='bam')
+    if not bowtieReport:
+        sys.stderr.write("Problem: runBowtie failed")
+        return None
     if not (os.path.exists(bowtieReport['bam'])):
         sys.stderr.write("Problem: runBowtie failed to return expected bamfile {}\n".format(bowtieReport['bam']))
         return None
@@ -795,11 +802,14 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar):
             "version": pilon_version, 
             "output": pilonContigs+".fasta", 
             "num_changes": pilon_changes, 
-            "seconds" : pilon_time}
+            "seconds" : pilon_time,
+            "bowtie_version": bowtieReport['version']}
+    if 'samtools_version' in bowtieReport:
+        report['samtools_version'] = bowtieReport['samtools_version']
 
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
-    os.remove(contigFile) # clean up old one
+    #os.remove(contigFile) # clean up old one
     return report 
 
 def calcReadDepth(bamfiles):
@@ -963,6 +973,8 @@ def write_html_report(htmlFile, read_list, assembly_data):
             HTML.write(svg_text+"\n\n</div>\n")
             program_version[assembly_data["bandage"]['program']] = assembly_data["bandage"]["version"]
         HTML.write("</section>\n")
+    elif 'bandage_missing_message' in assembly_data:
+        HTML.write("<section>"+assembly_data['bandage_missing_message']+"</section>")
 
     HTML.write('<section>\n<h2>Assembly</h2>\n')
     HTML.write("""
@@ -996,6 +1008,10 @@ def write_html_report(htmlFile, read_list, assembly_data):
                     HTML.write("<tr><td>%s:</td><td>%s</td></tr>\n"%(key, value))
                 HTML.write("<tr></tr>\n") # blank row
                 program_version[info['program']] = info["version"]
+                if 'bowtie2_version' in info:
+                    program_version['bowtie2'] = info['bowtie2_version']
+                if 'samtools_version' in info:
+                    program_version['samtools'] = info['samtools_version']
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
 
@@ -1020,6 +1036,10 @@ def write_html_report(htmlFile, read_list, assembly_data):
             HTML.write("<tr><td>{}:</td><td>{}</td></tr>\n".format(key, assembly_data['contig_filtering'][key])) 
         HTML.write("</tbody></table>\n")
         HTML.write("</section>\n")
+        if 'bowtie2_version' in assembly_data['contig_filtering']:
+            program_version['bowtie2'] = assembly_data['contig_filtering']['bowtie2_version']
+        if 'samtools_version' in assembly_data['contig_filtering']:
+            program_version['samtools'] = assembly_data['contig_filtering']['samtools_version']
 
     HTML.write('<div>\n<h2>Preprocessing of Reads</h2>\n')
     for read_set in read_list:
@@ -1126,13 +1146,6 @@ def main():
     LOG.write("Work directory is "+WORK_DIR+"\n\n")
     LOG.write("Final output will be saved to "+SAVE_DIR+"\n\n")
     LOG.write("Detailed output will be saved to "+DETAILS_DIR+"\n\n")
-    details = {'assembly': {} }
-    details["post-assembly transformation"] = []
-    details["assembly"] = {}
-    details["coverage"] = {}
-    details["polishing"] = []
-    details["version"] = {}
-    details["problem"] = []
 
     ReadLibrary.NUM_THREADS = args.threads
     ReadLibrary.MEMORY = args.memory  # in GB
@@ -1258,7 +1271,6 @@ def main():
         args.racon_iterations = 0
         comment = "Because recipe is for metagenome, turning pilon and racon iterations off."
         LOG.write(comment+"\n")
-        details['problem'].append(comment)
 
     contigs = ""
     startTime = time()
@@ -1317,12 +1329,15 @@ def main():
                         if 'output' in raconReport:
                             raconContigFile = raconReport['output']
                         polishing_records.append(raconReport)
-                    LOG.write("racon output = {}, report={}\n".format(raconContigFile, raconReport))
-                    if os.path.exists(raconContigFile):
-                        contigs = raconContigFile
-                        sys.stderr.write("contigs file is now {}\n".format(contigs))
+                        LOG.write("racon output = {}, report={}\n".format(raconContigFile, raconReport))
+                        if os.path.exists(raconContigFile):
+                            contigs = raconContigFile
+                            sys.stderr.write("contigs file is now {}\n".format(contigs))
+                        else:
+                            break # break out of iterating racon_iterations, go to next long-read file if any
                     else:
-                        break # break out of iterating racon_iterations, go to next long-read file if any
+                        LOG.write("runRacon failed to return expected data")
+                        break
         
     if args.pilon_iterations and args.pilon_jar and contigs:
         pilon_end_time = time() + args.pilon_hours * 60 * 60
@@ -1348,16 +1363,12 @@ def main():
                     # check number of changes in most recent round, quit if zero
                     if ('num_changes' in pilonReport) and (pilonReport['num_changes'] == 0):
                         break
+                else:
+                    LOG.write("runPilon failed to return expected data")
+                    break
     assembly_data['polishing'] = polishing_records
             
-    if contigs and os.path.getsize(contigs):
-        command = ["samtools"]
-        proc = subprocess.Popen(command, shell=False, stderr=subprocess.PIPE)
-        proc.wait()
-        version_text = proc.stderr.read().decode()
-        for line in version_text.splitlines():
-            if 'Version' in line:
-                details["version"]['samtools'] = line.strip()
+    if os.path.exists(contigs) and os.path.getsize(contigs):
         filterReport = filterContigsByLengthAndCoverage(contigs, read_list, args.min_contig_length, args.min_contig_coverage, args.threads, args.prefix)
         assembly_data['contig_filtering'] = filterReport
         if 'good contigs file' in filterReport:
@@ -1372,9 +1383,17 @@ def main():
 
         gfaFile = os.path.join(DETAILS_DIR, args.prefix+"assembly_graph.gfa")
         if os.path.exists(gfaFile) and os.path.getsize(gfaFile):
-            if 'total contigs' in filterReport and int(filterReport['total contigs']) <= args.maxContigsForBandage:
-                bandageReport = runBandage(gfaFile)
-                assembly_data['bandage'] = bandageReport
+            if 'total contigs' in filterReport:
+                if int(filterReport['total contigs']) <= args.maxContigsForBandage:
+                    bandageReport = runBandage(gfaFile)
+                    assembly_data['bandage'] = bandageReport
+                else:
+                    assembly_data['bandage_missing_message'] = f"Bandage plot not generated for assemblies with over {args.maxContigsForBandage} contigs."
+
+
+    else:
+        LOG.write("contigs not generated")
+        sys.exit(1)
 
     with open(os.path.join(DETAILS_DIR, args.prefix+"assembly_details.json"), "w") as fp:
         try:
