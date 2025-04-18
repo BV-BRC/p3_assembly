@@ -1306,11 +1306,10 @@ def main():
         elapsedHumanReadable = "%.1f hours"%(elapsedTime/3600.0)
     elapsedHumanReadable += f" ({int(elapsedTime)} seconds)"
 
-    assembly_data['duration'] = elapsedHumanReadable
-
     if os.path.exists('contigs.fasta'):
         contigs = 'contigs.fasta'
         assembly_data["contigs file size"] = os.path.getsize("contigs.fasta")
+        assembly_data['duration'] = elapsedHumanReadable
         LOG.write("size of contigs file is %d\n"%os.path.getsize(contigs))
     else:
         comment = "assembly failed to generate contigs"
