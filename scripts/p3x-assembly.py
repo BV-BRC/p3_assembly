@@ -428,10 +428,11 @@ usage: canu [-version] [-citation] \
     p.wait()
 
     command = [canu_exec, "-d", '.', "-p", "canu", "genomeSize=%d"%genome_size]
-    command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads), "stopOnReadQuality=false"])
+    command.extend(["maxMemory=" + str(memory), "maxThreads=" + str(threads)])
     if "1.7" in canu_version:
         # special handling for this version
         command.append("gnuplotTested=true")
+        command.append("stopOnReadQuality=false")
     
     pacbio_reads = []
     nanopore_reads = []
@@ -742,17 +743,13 @@ def runRacon(contigFile, read_set, num_threads):
     #os.remove(contigFile) #delete old one
     return report
 
-def runPilon(contigFile, read_set, num_threads, pilon_jar):
+def runPilon(contigFile, read_set, num_threads, pilon_jar=None):
     """ 
     polish contigs with short reads (illumina or iontorrent)
     first map reads to contigs with bowtie
     """
     LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     LOG.write("runPilon(%s, %s, %s)\n"%(contigFile, read_set.files[0], str(num_threads)))
-    if not (pilon_jar and os.path.exists(pilon_jar)):
-        comment = "jarfile %s not found for runPilon, giving up"%(pilon_jar)
-        LOG.write(comment+"\n")
-        return None
     bowtieReport = runBowtie(contigFile, read_set, num_threads, outformat='bam')
     if not bowtieReport:
         sys.stderr.write("Problem: runBowtie failed")
@@ -761,7 +758,10 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar):
         sys.stderr.write("Problem: runBowtie failed to return expected bamfile {}\n".format(bowtieReport['bam']))
         return None
     pilon_start_time = time()
-    command = ['java', '-Xmx32G', '-jar', pilon_jar, '--genome', contigFile]
+    if (pilon_jar and os.path.exists(pilon_jar)):
+        command = ['java', '-Xmx32G', '-jar', pilon_jar, '--genome', contigFile]
+    else:
+        command = ['pilon', '--genome', contigFile]
     if len(read_set.files) > 1:
         command.extend(('--frags', bowtieReport['bam']))
     else:
@@ -1100,7 +1100,7 @@ def main():
     parser.add_argument('--normalize', action='store_true', help='normalize read depth to target depth with BBNorm')
     parser.add_argument('--filtlong', action='store_true', help='filter long reads to target depth using filtlong')
     parser.add_argument('--target_depth', type=int, default=200, help='downsample to this approx. coverage')
-    parser.add_argument('--pilon_jar', help='path to pilon executable or jar')
+    parser.add_argument('--pilon_jar', help='path to pilon executable or jar', default=None)
     parser.add_argument('--canu_exec', default="canu", help='path to canu executable (def "canu")')
     parser.add_argument('--spades_for_unicycler', help='path to spades.py suitable for unicycler')
     parser.add_argument('--bandage', action='store_true', help='generate image of assembly path using Bandage')
@@ -1150,10 +1150,6 @@ def main():
     ReadLibrary.NUM_THREADS = args.threads
     ReadLibrary.MEMORY = args.memory  # in GB
     ReadLibrary.LOG = sys.stderr
-
-    if (args.pilon_iterations and not os.path.exists(args.pilon_jar)):
-        sys.stderr.write("pilon was requested but pilon jar file: {}, not found. Failing.".format(args.pilon_jar))
-        return main_return_code
 
     read_list = []
     if args.anonymous_reads:
@@ -1338,7 +1334,7 @@ def main():
                         LOG.write("runRacon failed to return expected data")
                         break
         
-    if args.pilon_iterations and args.pilon_jar and contigs:
+    if args.pilon_iterations and contigs:
         pilon_end_time = time() + args.pilon_hours * 60 * 60
         # now run pilon with each short-read file
         for read_set in short_reads:
