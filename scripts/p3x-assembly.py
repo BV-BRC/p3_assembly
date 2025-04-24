@@ -792,7 +792,10 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar=None):
     with open(pilonContigs+".changes") as CHANGES:
         pilon_changes = len(CHANGES.read().splitlines())
     #os.remove(pilonContigs+".changes")
-    command = ["java", "-jar", pilon_jar, "--version"]
+    if (pilon_jar and os.path.exists(pilon_jar)):
+        command = ["java", "-jar", pilon_jar, "--version"]
+    else:
+        command = ['pilon', '--version']
     proc = subprocess.run(command, shell=False, capture_output=True, text=True)
     pilon_version = proc.stdout
 
