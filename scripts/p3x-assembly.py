@@ -1393,7 +1393,7 @@ def main():
         LOG.write("contigs not generated")
         sys.exit(1)
 
-    with open(os.path.join(DETAILS_DIR, args.prefix+"assembly_details.json"), "w") as fp:
+    with open(os.path.join(DETAILS_DIR, args.prefix+"run_details.json"), "w") as fp:
         try:
             json.dump(assembly_data, fp, indent=2, sort_keys=True)
         except UnicodeDecodeError as ude:
