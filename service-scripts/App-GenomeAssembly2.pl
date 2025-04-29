@@ -128,23 +128,8 @@ sub assemble
     #
     # We need to arrange our path. Hardcode for now. Think about parameterizing.
     #
-    my @path_additions = ("$ENV{KB_RUNTIME}/spades-3.13.0/bin",
-			  "$ENV{KB_RUNTIME}/samtools-1.9/bin",
-			  "$ENV{KB_RUNTIME}/bowtie2-v2.2.9/bin");
-
-    my $pilon;
-    my @pilon_paths = ("$ENV{KB_RUNTIME}/lib/pilon.jar", "/usr/share/java/pilon.jar");
-    for my $p (@pilon_paths)
-    {
-	if (-f $p)
-	{
-	    $pilon = $p;
-	    last;
-	}
-    }
-
-    -f $pilon or die "Cannot find pilon jar in @pilon_paths\n";
-    print STDERR "Using pilon jar at $pilon\n";
+    my @path_additions = ("$ENV{KB_RUNTIME}/spades-4.0.0/bin",
+			  "$ENV{KB_RUNTIME}/samtools-1.20/bin"); #,  "$ENV{KB_RUNTIME}/bowtie2-v2.2.9/bin");
 
     my $token = $app->token();
     my $ws = $app->workspace();
@@ -284,7 +269,6 @@ sub assemble
     
     my @cmd = ("p3x-assembly",
 	       "--prefix", "$prefix",
-	       "--pilon_jar", $pilon,
 	       "--path-prefix", @path_additions,
 	       @params);
 
