@@ -221,6 +221,13 @@
       "label": "Debug level",
       "required": 0,
       "type": "int"
+    },
+    {
+      "id": "max_bases",
+      "desc": "Limit on how much data will be allowed.",
+      "label": "Maximum DNA bases",
+      "required": 0,
+      "type": "int"
     }
   ],
   "script": "App-GenomeAssembly2"

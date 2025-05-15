@@ -538,7 +538,7 @@ usage: flye (--pacbio-raw | --pacbio-corr | --pacbio-hifi | --nano-raw |
         shutil.move("assembly_graph.gfa", os.path.join(DETAILS_DIR, prefix+"assembly_graph.gfa"))
     return assembly_data
 
-def runMinimap(contigFile, read_set, num_threads, outformat='sam'):
+def runMinimap(contigFile, read_set, num_threads, outformat='sam', save_intermediate=False):
     LOG.write("runMinimap: Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     """
     Map long reads to contigs by minimap2 (read paf-file, readsFile; generate paf file).
@@ -570,12 +570,12 @@ def runMinimap(contigFile, read_set, num_threads, outformat='sam'):
     report['sam'] = contigSam
 
     if outformat == 'bam':
-        (contigBam, samtools_version) = convertSamToBam(contigSam, num_threads)
+        (contigBam, samtools_version) = convertSamToBam(contigSam, num_threads, save_sam=save_intermediate)
         report['bam'] = contigBam
         report['samtools_version'] = samtools_version
     return report
             
-def runBowtie(contigFile, read_set, num_threads, outformat='bam'):
+def runBowtie(contigFile, read_set, num_threads, outformat='bam', save_intermediate=False):
     """
     index contigsFile, then run bowtie2, then convert sam file to pos-sorted bam and index
     """
@@ -621,14 +621,16 @@ def runBowtie(contigFile, read_set, num_threads, outformat='bam'):
     #shutil.rmtree('bowtie_index_dir')
     report['command'] = ' '.join(command)
     report['sam'] = samFile
+    if not save_intermediate:
+        shutil.rmtree('bowtie_index_dir')# delete dir and all files there
     if outformat == 'bam':
-        (contigsBam, samtools_version) = convertSamToBam(samFile, num_threads)
+        (contigsBam, samtools_version) = convertSamToBam(samFile, num_threads,  save_sam=save_intermediate)
         LOG.write('got bam file %s\n'%contigsBam)
         report['bam'] = contigsBam
         report['samtools_version'] = samtools_version
     return report
 
-def convertSamToBam(samFile, num_threads):
+def convertSamToBam(samFile, num_threads, save_sam=False):
     #convert format to bam and index
     LOG.write("convertSamToBam(%s, %s)\n"%(samFile, str(num_threads)))
     tempTime = time()
@@ -651,6 +653,8 @@ def convertSamToBam(samFile, num_threads):
         comment = "samtools view returned %d"%return_code
         LOG.write(comment+"\n")
         return None
+    if not save_sam:
+        os.unlink(samFile)
 
     LOG.flush()
 
@@ -683,7 +687,7 @@ def convertSamToBam(samFile, num_threads):
     #LOG.write("samtools index return code = %d\n"%return_code)
     return (bamFileSorted, samtools_version)
 
-def runRacon(contigFile, read_set, num_threads):
+def runRacon(contigFile, read_set, num_threads, save_intermediate=False):
     """
     Polish (correct) sequence of assembled contigs by comparing to the original long-read sequences
     Run racon on reads, read-to-contig-sam, contigs. Generate polished contigs.
@@ -701,7 +705,7 @@ def runRacon(contigFile, read_set, num_threads):
     report['program'] = 'racon'
     report['version'] = racon_version
 
-    minimap_report = runMinimap(contigFile, read_set, num_threads, outformat='sam')
+    minimap_report = runMinimap(contigFile, read_set, num_threads, outformat='sam', save_intermediate=save_intermediate)
     report['minimap report'] = minimap_report
     readsToContigsSam = minimap_report['sam']
     if not readsToContigsSam:
@@ -726,7 +730,8 @@ def runRacon(contigFile, read_set, num_threads):
     report['seconds'] = time()-raconStartTime
     if return_code != 0:
         return None
-    os.remove(readsToContigsSam)
+    if not save_intermediate:
+        os.remove(readsToContigsSam)
     raconContigSize = os.path.getsize(raconContigs)
     LOG.write("size of raconContigs: %d\n"%raconContigSize)
     if raconContigSize < 10:
@@ -743,14 +748,14 @@ def runRacon(contigFile, read_set, num_threads):
     #os.remove(contigFile) #delete old one
     return report
 
-def runPilon(contigFile, read_set, num_threads, pilon_jar=None):
+def runPilon(contigFile, read_set, num_threads, pilon_jar=None, save_intermediate=False):
     """ 
     polish contigs with short reads (illumina or iontorrent)
     first map reads to contigs with bowtie
     """
     LOG.write("runPilon starting Time = %s\n"%(strftime("%a, %d %b %Y %H:%M:%S", localtime(time()))))
     LOG.write("runPilon(%s, %s, %s)\n"%(contigFile, read_set.files[0], str(num_threads)))
-    bowtieReport = runBowtie(contigFile, read_set, num_threads, outformat='bam')
+    bowtieReport = runBowtie(contigFile, read_set, num_threads, outformat='bam', save_intermediate=save_intermediate)
     if not bowtieReport:
         sys.stderr.write("Problem: runBowtie failed")
         return None
@@ -783,15 +788,17 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar=None):
     pilon_time = time() - pilon_start_time
     LOG.write("pilon duration = %d\n"%(pilon_time))
     LOG.flush()
-    os.remove(bowtieReport['bam'])
-    if os.path.exists(bowtieReport['bam']+".bai"):
-        os.remove(bowtieReport['bam']+".bai")
+    if not save_intermediate:
+        os.remove(bowtieReport['bam'])
+        if os.path.exists(bowtieReport['bam']+".bai"):
+            os.remove(bowtieReport['bam']+".bai")
     if return_code != 0:
         return None
     pilon_changes = 0
     with open(pilonContigs+".changes") as CHANGES:
         pilon_changes = len(CHANGES.read().splitlines())
-    #os.remove(pilonContigs+".changes")
+    if not save_intermediate:
+        os.remove(pilonContigs+".changes")
     if (pilon_jar and os.path.exists(pilon_jar)):
         command = ["java", "-jar", pilon_jar, "--version"]
     else:
@@ -812,7 +819,8 @@ def runPilon(contigFile, read_set, num_threads, pilon_jar=None):
 
     comment = "pilon, input %s, output %s, num_changes = %d"%(contigFile, pilonContigs, pilon_changes)
     LOG.write(comment+"\n")
-    #os.remove(contigFile) # clean up old one
+    if not save_intermediate:
+        os.remove(contigFile) # clean up old one
     return report 
 
 def calcReadDepth(bamfiles):
@@ -1111,6 +1119,8 @@ def main():
     parser.add_argument('--params_json', help='JSON file with additional information.')
     parser.add_argument('--path_prefix', '--path-prefix', help="Add the given directories to the PATH", nargs='*', required=False)
     parser.add_argument('-v', '--verbose', action='store_true', help="Output more progress information.", required=False)
+    parser.add_argument('--debug', action='store_true', help="Save intermediate files.", required=False)
+
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -1321,7 +1331,7 @@ def main():
             for longReadSet in long_reads:
                 for i in range(0, args.racon_iterations):
                     LOG.write("runRacon on {}, {}, platform={}, round={}\n".format(contigs, longReadSet.files[0], longReadSet.platform, i))
-                    raconReport = runRacon(contigs, longReadSet, args.threads)
+                    raconReport = runRacon(contigs, longReadSet, args.threads, save_intermediate=args.debug)
                     raconContigFile = ''
                     if raconReport:
                         if 'output' in raconReport:
@@ -1348,7 +1358,7 @@ def main():
                     break
 
                 LOG.write("runPilon(%s, %s, ...)\n"%(contigs, fastqFile))
-                pilonReport = runPilon(contigs, read_set, args.threads, args.pilon_jar)
+                pilonReport = runPilon(contigs, read_set, args.threads, args.pilon_jar, save_intermediate=args.debug)
                 if pilonReport:
                     polishing_records.append(pilonReport)
                     pilonContigFile = pilonReport['output']
