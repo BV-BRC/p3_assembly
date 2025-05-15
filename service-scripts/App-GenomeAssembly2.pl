@@ -49,6 +49,8 @@ my $script = Bio::KBase::AppService::AppScript->new(\&assemble, \&preflight);
 
 my $download_path;
 
+my $MAX_BASES = 1e10;
+
 my $rc = $script->run(\@ARGV);
 
 exit $rc;
@@ -255,6 +257,16 @@ sub assemble
     # also used for filtlong downsampling to target_depth multiple of estimated genome size
     #
     push(@params, "--genome_size", $params->{genome_size});
+
+    #
+    # MAX_BASES is the upper limit on how much data gets analyzed
+    #
+    if (exists $params->{max_bases}) {
+        push(@params, "--max_bases", $params->{max_bases});
+        }
+    elsif ($MAX_BASES) {
+        push(@params, "--max_bases", $MAX_BASES);
+    }
 
     #
     # Request bandage plots
