@@ -27,7 +27,7 @@ def capture_seqtk_version():
                 ReadLibrary.program_version['seqtk'] = seqtk_version
                 break
 
-def constrain_total_bases(read_library_list, total_bases_limit):
+def constrain_total_bases(read_library_list, total_bases_limit, save_original=False):
     # apply the experiment-wide limit to set of reads
     # sample each library proportionally so total is capped to limit
     ReadLibrary.LOG.write(f"constrain_total_bases of {len(read_library_list)} input libraries to {total_bases_limit}\n")
@@ -44,7 +44,7 @@ def constrain_total_bases(read_library_list, total_bases_limit):
             long_read_bases += library.num_bases
     ReadLibrary.LOG.write(f"total bases over {len(read_library_list)} input libraries is {total_bases}\n")
     if total_bases < total_bases_limit:
-        ReadLibrary.LOG.write("total bases is within limit")
+        ReadLibrary.LOG.write("total bases is within limit\n")
         return
     proportion_to_sample_short = 1
     proportion_to_sample_long = 1
@@ -63,9 +63,9 @@ def constrain_total_bases(read_library_list, total_bases_limit):
     #proportion_to_sample = total_bases_limit/total_bases
     for library in read_library_list:
         if library.length_class == 'short' and (proportion_to_sample_short < 1):
-            library.down_sample_reads(proportion_to_sample_short)
+            library.down_sample_reads(proportion_to_sample_short, save_original)
         elif library.length_class == 'long' and (proportion_to_sample_long < 1):
-            library.down_sample_reads(proportion_to_sample_long)
+            library.down_sample_reads(proportion_to_sample_long, save_original)
     ReadLibrary.LOG.write(f"\nconstrain_total_bases complete\n")
 
 def inferPlatform(read_id, maxReadLength, avgReadQuality):
@@ -415,7 +415,7 @@ class ReadLibrary:
 
         return
 
-    def normalize_read_depth(self, target_depth=100):
+    def normalize_read_depth(self, target_depth=100, save_original=False):
         #use BBNorm
         startTime = time()
         comment = "normalize read depth using BBNorm"
@@ -475,6 +475,10 @@ class ReadLibrary:
             self.files[0]=out_file1 
             if file2:
                 self.files[1] = out_file2
+            if not save_original: 
+                os.unlink(file1) # free up disk space
+                if file2:
+                    os.unlink(file2)
             self.study_reads()    
             self.transformation = 'normalize to target depth'
             self.command = " ".join(command)
@@ -496,7 +500,7 @@ class ReadLibrary:
         ReadLibrary.LOG.write("normalize process time: {}\n".format(time() - startTime))
         return
 
-    def filter_long_reads(self, target_bases, illumina_reads=None):
+    def filter_long_reads(self, target_bases, illumina_reads=None, save_original=False):
         """
         use filtlong to downsample long reads based on quality and kmer-matches to illlumina (proxy for accuracy)
         """
@@ -538,14 +542,17 @@ class ReadLibrary:
         command.append(read_file)
         ReadLibrary.LOG.write("filtlong, command line = "+" ".join(command)+"\n")
         self.command = " ".join(command)+"\n"
-        proc = subprocess.Popen(command, shell=False, stdout=out_fh)
+        proc = subprocess.Popen(command, shell=False, stdout=out_fh, stderr=open(os.devnull, 'w'))
         proc.wait()
         out_fh.close()
         self.file_size[0] = os.path.getsize(out_file)
+        self.files[0] = out_file
+        if not save_original: 
+            os.unlink(self.files[0]) # free up disk space
         self.study_reads()
-        ReadLibrary.LOG.write("after: files = "+", ".join(self.files)+"\n")
+        ReadLibrary.LOG.write("after filtlong: files = "+", ".join(self.files)+"\n")
 
-    def down_sample_reads(self, proportion_to_sample):
+    def down_sample_reads(self, proportion_to_sample, save_original=False):
         """
         read file over size limit, down-sample using seqtk or filtlong
         """
@@ -566,6 +573,7 @@ class ReadLibrary:
             capture_seqtk_version()# capture version of program
 
         self.command = ''
+        new_files = []
         for i, read_file in enumerate(self.files):
             out_file = os.path.basename(read_file) # will write to current working directory
             if out_file.endswith("gz"):
@@ -575,23 +583,23 @@ class ReadLibrary:
             if out_file.endswith(".fastq"):
                 out_file = out_file[:-6]
             out_file += suffix
-
-            self.files[i] = out_file
             
             out_fh = open(out_file, 'w')
             if self.length_class == 'long':
                 num_bases_to_save = int(proportion_to_sample * self.num_bases)
                 command = ['filtlong', '--target_bases', str(num_bases_to_save), read_file] 
             else:
-                #command = ['seqtk', 'sample', read_file, '{:.3f}'.format(prop_to_sample)] 
                 num_reads_to_save = int(proportion_to_sample * self.num_reads / len(self.files))
                 command = ['seqtk', 'sample', '-2', read_file, str(num_reads_to_save)]
             ReadLibrary.LOG.write("downsample, command line = "+" ".join(command)+"\n")
             self.command += " ".join(command)+"\n"
-            proc = subprocess.Popen(command, shell=False, stdout=out_fh)
+            proc = subprocess.Popen(command, shell=False, stdout=out_fh, stderr=open(os.devnull, 'w'))
             proc.wait()
             out_fh.close()
             self.file_size[i] = os.path.getsize(out_file)
+            self.files[i] = out_file
+            if not save_original:  
+                os.unlink(read_file) # delete large original file to free up temp space
 
         ReadLibrary.LOG.write("after: files = "+", ".join(self.files)+"\n")
         self.process_time = time() - startTime
